@@ -200,13 +200,32 @@ def _bone_map(doc: dict) -> dict:
     return mapping
 
 
+def _quat_mul(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Hamilton 乘积（批量），四元数顺序 (x, y, z, w)。"""
+    ax, ay, az, aw = a[..., 0], a[..., 1], a[..., 2], a[..., 3]
+    bx, by, bz, bw = b[..., 0], b[..., 1], b[..., 2], b[..., 3]
+    return np.stack([
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+        aw * bw - ax * bx - ay * by - az * bz,
+    ], axis=-1)
+
+
 def _add_animation(appender: _Appender, doc: dict, mapping: dict, quats: np.ndarray, fps: float) -> bool:
-    """给映射到的骨骼节点加 rotation 动画轨道。"""
+    """给映射到的骨骼节点加 rotation 动画轨道。
+
+    SMPL-X 的局部旋转是“相对静止姿势的增量”，而角色骨骼的静止旋转通常不是单位
+    四元数，所以要先取出骨骼的 rest 旋转再右乘增量：q = q_rest ⊗ q_delta。
+    """
     times = (np.arange(quats.shape[0], dtype=np.float32) / float(fps))
     time_accessor = appender.add_floats(times, "SCALAR", minmax=True)
     samplers, channels = [], []
     for smplx_index, node_index in sorted(mapping.items()):
-        values = np.asarray(quats[:, smplx_index, :], dtype=np.float32)
+        delta = np.asarray(quats[:, smplx_index, :], dtype=np.float64)
+        rest = doc["nodes"][node_index].get("rotation") or [0.0, 0.0, 0.0, 1.0]
+        rest = np.asarray(rest, dtype=np.float64).reshape(1, 4)
+        values = _quat_mul(np.repeat(rest, delta.shape[0], axis=0), delta).astype(np.float32)
         # glTF 四元数顺序是 (x, y, z, w)，与我们的输出一致
         value_accessor = appender.add_floats(values, "VEC4")
         samplers.append({"input": time_accessor, "output": value_accessor,
