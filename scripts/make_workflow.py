@@ -4,10 +4,10 @@
 
     LoadVideo → GetVideoComponents → ZMocapTrack / ZMocapFrames / ZMocapModels
       → ZMocapSapiens2Keypoints / ZMocapSam3DBodyFeatures / ZMocapHaMeRHandFeatures
-      → ZMocapExMR → ZMocapRig ← ZMocapVRMLoader（两者都在节点内预览）
+      → ZMocapExMR → ZMocapSMPL2SOMA → ZMocapSOMA2VRM → ZMocapRig ← ZMocapVRMLoader
                     └→ ZMocapExport
 
-角色加载（ZMocapVRMLoader）与动作绑定（ZMocapRig）完全解耦。
+转换类节点单进单出、只处理 motion；角色只在 ZMocapRig 这一步出现。
 
 用法::
 
@@ -106,25 +106,23 @@ def build(video: str = "zmocap_test.mp4", character: str = "(none / built-in ske
     loader = b.node("ZMocapVRMLoader", (1900, 380), (330, 90), [character],
                     outputs=[("character", "ZMOCAP_CHARACTER"), ("glb_path", "STRING")])
 
-    # 绑定：motion + 角色 → GLB（唯一消费者关系：Rig 吃 motion，吃角色）
-    rig = b.node("ZMocapRig", (2280, 80), (330, 120), ["zmocap_rig", True],
-                 inputs=[("motion", "ZMOCAP_MOTION"), ("character", "ZMOCAP_CHARACTER")],
-                 outputs=[("glb_path", "STRING")])
-    b.link(exmr, 0, rig, 0, "ZMOCAP_MOTION")
-    b.link(loader, 0, rig, 1, "ZMOCAP_CHARACTER")
-
-
-    # SOMA 枢纽：SMPL-X → SOMA(78 关节) → 角色（可换成其它目标的同类节点）
-    to_soma = b.node("ZMocapSMPL2SOMA", (2280, 500), (330, 120), [30.0, True],
-                     inputs=[("params", "ZMOCAP_MOTION")],
-                     outputs=[("soma", "ZMOCAP_SOMA"), ("info", "STRING")])
+    # 纯 motion 的格式转换：SMPL-X → SOMA → 标准 humanoid，全程不碰角色
+    to_soma = b.node("ZMocapSMPL2SOMA", (1900, 80), (300, 70), [],
+                     inputs=[("motion", "ZMOCAP_MOTION")],
+                     outputs=[("motion", "ZMOCAP_MOTION")])
     b.link(exmr, 0, to_soma, 0, "ZMOCAP_MOTION")
 
-    soma_rig = b.node("ZMocapSOMA2VRM", (2640, 500), (330, 150), [30.0, True],
-                      inputs=[("soma", "ZMOCAP_SOMA"), ("character", "ZMOCAP_CHARACTER")],
-                      outputs=[("glb", "STRING"), ("info", "STRING")])
-    b.link(to_soma, 0, soma_rig, 0, "ZMOCAP_SOMA")
-    b.link(loader, 0, soma_rig, 1, "ZMOCAP_CHARACTER")
+    to_vrm = b.node("ZMocapSOMA2VRM", (2240, 80), (300, 70), [],
+                    inputs=[("motion", "ZMOCAP_MOTION")],
+                    outputs=[("motion", "ZMOCAP_MOTION")])
+    b.link(to_soma, 0, to_vrm, 0, "ZMOCAP_MOTION")
+
+    # 绑定 + 写文件：唯一需要角色的节点
+    rig = b.node("ZMocapRig", (2580, 80), (340, 120), ["zmocap_rig", True],
+                 inputs=[("motion", "ZMOCAP_MOTION"), ("character", "ZMOCAP_CHARACTER")],
+                 outputs=[("glb_path", "STRING")])
+    b.link(to_vrm, 0, rig, 0, "ZMOCAP_MOTION")
+    b.link(loader, 0, rig, 1, "ZMOCAP_CHARACTER")
 
     export = b.node("ZMocapExport", (2280, 720), (330, 130), ["zmocap_motion", True],
                     inputs=[("motion", "ZMOCAP_MOTION")], outputs=[("saved_path", "STRING")])

@@ -772,6 +772,32 @@ class ZMocapRig:
             target = str(character or "").strip()
         if target.startswith("("):
             target = ""
+        # 规范 humanoid 运动（skeleton='vrm'）：绑定/写文件都交给 binding 模块，
+        # 角色只在这一步用得上，转换类节点完全不碰角色。
+        if str(motion.get("skeleton") or "") == "vrm":
+            from ..soma.binding import write_character_glb, write_humanoid_glb
+
+            animation = np.asarray(motion["world_rotation"], dtype=np.float64)
+            seed = "|".join([
+                "vrm", str(animation.shape[0]), f"{float(motion.get('fps', 30.0)):.3f}",
+                f"{float(np.abs(animation).sum()):.6f}", f"{float(np.abs(motion['transl']).sum()):.6f}",
+                target,
+            ])
+            digest = hashlib.sha1(seed.encode()).hexdigest()[:8]
+            outdir = Path(folder_paths.get_output_directory())
+            out_path = outdir / f"{filename}_{digest}.glb"
+            if target:
+                path, report = write_character_glb(motion, target, out_path)
+            else:
+                path, report = write_humanoid_glb(motion, out_path)
+            print(f"[zmocap] rig {Path(path).name} ({report['bones']} bones, "
+                  f"{report.get('frames', int(animation.shape[0]))} frames, scale {report.get('scale', 1.0)})")
+            relative = path.relative_to(outdir).as_posix()
+            return {
+                "ui": {"zmocap_glb": [relative], "zmocap_rig": [{"path": str(path), **report}]},
+                "result": (relative,),
+            }
+
         # 有角色就一律按角色绑（`skinned` 只是前端的显示层开关，不再影响绑定内容），
         # 否则输出自带骨架。
         mode = "auto" if target else "mannequin"
