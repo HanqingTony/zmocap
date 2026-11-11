@@ -15,12 +15,30 @@ REQUIRED = {
 }
 
 
+def default_models_dir() -> Path:
+    """<ComfyUI>/models/zmocap：优先问 ComfyUI，其次向上找 models 目录。"""
+    try:
+        import folder_paths
+
+        return Path(folder_paths.models_dir) / "zmocap"
+    except Exception:
+        pass
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        candidate = parent / "models" / "zmocap"
+        if candidate.is_dir():
+            return candidate
+        if (parent / "models").is_dir() and (parent / "comfy").is_dir():
+            return candidate
+    return here.parent / "models" / "zmocap"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--models-dir", default=None, help="默认 <ComfyUI>/models/zmocap")
     parser.add_argument("--vendor-dir", default=None, help="默认 <仓库>/vendor/ExMR")
     args = parser.parse_args()
-    root = Path(args.models_dir) if args.models_dir else Path(__file__).parent.parent.parent / "models" / "zmocap"
+    root = Path(args.models_dir) if args.models_dir else default_models_dir()
     print(f"模型目录: {root}")
     missing = 0
     for rel, minimum in REQUIRED.items():
