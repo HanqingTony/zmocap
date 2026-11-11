@@ -49,11 +49,7 @@ def main() -> int:
     body, hands = runner.features(frames, boxes, intrinsics, keypoints=keypoints, hands=not args.no_hands)
     print(f"features body{tuple(body.shape)} in {time.monotonic() - started:.1f}s")
 
-    from exmr import pipeline as P
-
-    count = int(np.asarray(boxes).shape[0])
-    rotations = np.tile(np.eye(3, dtype=np.float32), (count, 1, 1))
-    data = P.model_inputs(keypoints, boxes, intrinsics, rotations, body, hands, "sapiens2")
+    data = runner.model_inputs(keypoints, boxes, intrinsics, body=body, hands=hands)
 
     started = time.monotonic()
     native = runner.infer(data, static_cam=True, fps=args.fps)

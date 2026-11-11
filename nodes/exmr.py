@@ -56,8 +56,7 @@ class ZMocapExMR:
             body, hands = runner.features(
                 frames_dir, boxes, intrinsics, keypoints=keypoints, low_memory=low_memory
             )
-            rotations = np.tile(np.eye(3, dtype=np.float32), (count, 1, 1))
-            data = P.model_inputs(keypoints, boxes, intrinsics, rotations, body, hands, "sapiens2")
+            data = runner.model_inputs(keypoints, boxes, intrinsics, body=body, hands=hands)
             native = runner.infer(
                 data, static_cam=static_camera, fps=float(fps), smooth_global=smooth_global
             )

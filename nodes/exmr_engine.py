@@ -35,6 +35,11 @@ TARGETS = {
     "hand_mean": "hamer/data/mano_mean_params.npz",
 }
 
+# 目录级链接：vendored 代码按目录找 MANO 模型
+DIR_SOURCES = {
+    "hamer/data/mano": "body_models/mano",
+}
+
 _READY = False
 
 
@@ -64,9 +69,11 @@ def build_assets(models_root: Path, vendor: Path, assets: Path | None = None) ->
             sys.path.insert(0, str(path))
 
     # 让 vendored 代码用我们自己的助手，而不是原程序的私有包
+    import chumpy_compat
     import vendor_patch
 
     vendor_patch.patch(vendor, support, quiet=True)
+    chumpy_compat.ensure()  # MANO/SMPL .pkl 需要 chumpy，这里在 Python 3.13 上补兼容
     os.environ.setdefault("WANDB_MODE", "disabled")
     os.environ.setdefault("PYTHONNOUSERSITE", "1")
 
@@ -83,6 +90,20 @@ def build_assets(models_root: Path, vendor: Path, assets: Path | None = None) ->
             target.symlink_to(source)
         except OSError as exc:  # Windows 需要开发者模式
             raise RuntimeError(f"无法创建模型链接 {target} → {source}：{exc}") from exc
+
+    for target_rel, source_rel in DIR_SOURCES.items():
+        source = models_root / source_rel
+        target = assets / target_rel
+        if not source.is_dir():
+            raise FileNotFoundError(f"模型目录缺失，请放到 models/zmocap/：{source}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if _linked(source, target):
+            continue
+        if target.is_symlink() or target.exists():
+            if target.is_dir() and not target.is_symlink():
+                raise RuntimeError(f"{target} 已是真实目录，请先移走")
+            target.unlink()
+        target.symlink_to(source, target_is_directory=True)
 
     config = vendor / "configs/hamer_model_config.yaml"
     shutil.copy2(config, assets / "hamer/hamer_ckpts/model_config.yaml")
@@ -109,12 +130,48 @@ def torch_hub_load():
     return torch.hub.load
 
 
+def frame_intrinsics(intrinsics, count: int):
+    """把共享的 3x3 内参扩成逐帧 (count, 3, 3)，vendored 代码要求逐帧。
+
+    tracking.npz 里只存一份 3x3（同一台机器同一段视频），ExMR 的
+    _FrameDataset 却断言 len(boxes) == len(K)，所以这里对齐。
+    """
+    import numpy as np
+
+    k = np.asarray(intrinsics, dtype=np.float32)
+    if k.shape == (3, 3):
+        return np.repeat(k[None], int(count), axis=0)
+    if k.ndim == 3 and k.shape[1:] == (3, 3) and k.shape[0] == int(count):
+        return k
+    raise ValueError(f"内参形状 {k.shape} 无法对齐 {count} 帧")
+
+
 class ExMRRunner:
     """按阶段加载/运行 ExMR 各组件；每个方法自己负责把模型搬上显存与卸载。"""
 
     def __init__(self, assets: Path, device: str = "cuda"):
         self.assets = Path(assets)
         self.device = device
+
+    # --- 组装模型输入 -----------------------------------------------------
+    def model_inputs(self, keypoints, boxes, intrinsics, rotations=None, body=None, hands=None, backend="sapiens2"):
+        """把 numpy 输入整理成 vendored pipeline 要的张量（逐帧内参已对齐）。"""
+        import numpy as np
+        import torch
+        from exmr import pipeline as P
+
+        count = int(np.asarray(boxes).shape[0])
+        if rotations is None:
+            rotations = np.tile(np.eye(3, dtype=np.float32), (count, 1, 1))
+        return P.model_inputs(
+            torch.as_tensor(np.asarray(keypoints), dtype=torch.float32),
+            torch.as_tensor(np.asarray(boxes), dtype=torch.float32),
+            torch.as_tensor(frame_intrinsics(intrinsics, count)),
+            torch.as_tensor(np.asarray(rotations), dtype=torch.float32),
+            body,
+            hands,
+            backend,
+        )
 
     # --- 三个阶段 ---------------------------------------------------------
     def keypoints(self, frames: Path, boxes, low_memory=True):
@@ -146,7 +203,13 @@ class ExMRRunner:
         )
         try:
             with torch.inference_mode():
-                body_features = body(str(frames), torch.as_tensor(boxes, dtype=torch.float32), torch.as_tensor(intrinsics))
+                count = int(torch.as_tensor(boxes).shape[0])
+                aligned = frame_intrinsics(intrinsics, count)
+                body_features = body(
+                    str(frames),
+                    torch.as_tensor(boxes, dtype=torch.float32),
+                    torch.as_tensor(aligned),
+                )
         finally:
             del body
             _flush()
