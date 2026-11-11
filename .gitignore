@@ -1,6 +1,6 @@
 __pycache__/
 *.py[cod]
 .venv/
-vendor/
-models/
+/vendor/
+/models/
 .DS_Store
