@@ -14,6 +14,7 @@ from .body_features import ZMocapSam3DBodyFeatures
 from .character import ZMocapVRMLoader
 from .exmr import ZMocapExMR
 from .export import ZMocapExport
+from .format_soma import ZMocapSMPL2SOMA, ZMocapSOMA2VRM
 from .frames_node import ZMocapFrames, ZMocapIntrinsics
 from .hands import ZMocapHaMeRHandFeatures
 from .keypoints import ZMocapSapiens2Keypoints
@@ -35,6 +36,8 @@ NODE_CLASS_MAPPINGS = {
     "ZMocapHaMeRHandFeatures": ZMocapHaMeRHandFeatures,
     "ZMocapExMR": ZMocapExMR,
     "ZMocapRig": ZMocapRig,
+    "ZMocapSMPL2SOMA": ZMocapSMPL2SOMA,
+    "ZMocapSOMA2VRM": ZMocapSOMA2VRM,
     "ZMocapVRMLoader": ZMocapVRMLoader,
     "ZMocapExport": ZMocapExport,
 }
@@ -52,6 +55,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ZMocapHaMeRHandFeatures": "zmocap HaMeR Hand Features",
     "ZMocapExMR": "zmocap ExMR Solve",
     "ZMocapRig": "zmocap Rig (GLB)",
+    "ZMocapSMPL2SOMA": "zmocap SMPL2SOMA",
+    "ZMocapSOMA2VRM": "zmocap SOMA2VRM",
     "ZMocapVRMLoader": "zmocap VRM Loader",
     "ZMocapExport": "zmocap Export NPZ/BVH",
 }
