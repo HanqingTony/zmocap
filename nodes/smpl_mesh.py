@@ -189,21 +189,22 @@ def write_smpl_glb(motion: dict, out_path: Path, sticks: bool = True) -> tuple[P
             "children": [j for j in range(_SMPL_JOINTS) if int(parents[j]) == index],
         })
     doc["nodes"] = nodes
-    doc["scenes"] = [{"nodes": [0]}]
     doc["scene"] = 0
 
     # 逆绑定矩阵（rest 只有平移）
     inverse = np.tile(np.eye(4), (_SMPL_JOINTS, 1, 1))
     inverse[:, :3, 3] = -joints
-    ibm_view = appender.add_floats(inverse.reshape(_SMPL_JOINTS, 16).astype(np.float32), "MAT4")
+    # glTF 的 MAT4 是列主序：先整体转置再平铺
+    ibm_view = appender.add_floats(inverse.transpose(0, 2, 1).reshape(_SMPL_JOINTS, 16).astype(np.float32), "MAT4")
     doc["skins"] = [{
         "name": "SMPLX_skin",
         "joints": list(range(_SMPL_JOINTS)),
         "inverseBindMatrices": len(doc["accessors"]) - 1,
         "skeleton": 0,
     }]
-    nodes[0]["mesh"] = 0
-    nodes[0]["skin"] = 0
+    # 网格单独一个节点（不与根骨骼复用）：three.js 等对"网格节点 = 关节节点"处理不一致
+    nodes.append({"name": "SMPLX_mesh", "mesh": 0, "skin": 0})
+    doc["scenes"] = [{"nodes": [0, len(nodes) - 1]}]
     del ibm_view
 
     # ── 动画 ─────────────────────────────────────────────────────────────
@@ -216,8 +217,10 @@ def write_smpl_glb(motion: dict, out_path: Path, sticks: bool = True) -> tuple[P
                          "output": appender.add_floats(values, "VEC4")})
         channels.append({"sampler": len(samplers) - 1, "target": {"node": index, "path": "rotation"}})
     if np.abs(transl).max() > 1e-9:
+        # 根节点 rest 平移 = 骨盆静止位置，动画平移要在它之上叠加
+        root_translation = joints[0] + transl
         samplers.append({"input": time_accessor, "interpolation": "LINEAR",
-                         "output": appender.add_floats(transl.astype(np.float32), "VEC3")})
+                         "output": appender.add_floats(root_translation.astype(np.float32), "VEC3")})
         channels.append({"sampler": len(samplers) - 1, "target": {"node": 0, "path": "translation"}})
     doc["animations"] = [{"name": "zmocap", "samplers": samplers, "channels": channels}]
 
