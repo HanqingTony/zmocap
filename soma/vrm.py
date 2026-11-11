@@ -273,7 +273,8 @@ def retarget_to_rig(motion, character: str | Path) -> dict:
     }
 
 
-def write_animation(character: str | Path, out_path: str | Path, retargeted: dict, fps: float) -> Path:
+def write_animation(character: str | Path, out_path: str | Path, retargeted: dict, fps: float,
+                    sticks: bool = True) -> Path:
     """把重定向结果写成带动画的 GLB（角色网格原样保留）。
 
     world_rotation 是"骨骼基"下的世界旋转；节点空间的对应旋转为
@@ -359,16 +360,28 @@ def write_animation(character: str | Path, out_path: str | Path, retargeted: dic
     for node_index in node_order:
         if node_index not in animated:
             continue
-        values = np.concatenate([times[:, None], _quat_from_mat(local_rot[node_index])], axis=1).astype(np.float32)
+        # 注意：时间轴由 sampler.input 提供，output 只能是纯旋转（VEC4×帧数）
+        values = _quat_from_mat(local_rot[node_index]).astype(np.float32)
         sampler = len(samplers)
         samplers.append({"input": time_accessor, "interpolation": "LINEAR", "output": appender.add_floats(values, "VEC4")})
         channels.append({"sampler": sampler, "target": {"node": node_index, "path": "rotation"}})
 
     if hips_node is not None and hips_node in local_trans:
-        values = np.concatenate([times[:, None], local_trans[hips_node]], axis=1).astype(np.float32)
+        values = np.asarray(local_trans[hips_node], dtype=np.float32)
         sampler = len(samplers)
         samplers.append({"input": time_accessor, "interpolation": "LINEAR", "output": appender.add_floats(values, "VEC3")})
         channels.append({"sampler": sampler, "target": {"node": hips_node, "path": "translation"}})
+
+    if sticks:
+        from ..nodes.sticks import add_stick_layer
+
+        try:
+            stick_bones = {name: bones[name] for name in retargeted["world_rotation"] if name in bones}
+            count = add_stick_layer(appender, doc, stick_bones, parents, by_name,
+                                    head_of=lambda name: stick_bones[name]["head"])
+            print(f"[zmocap] 加骨骼小棍 {count} 根")
+        except Exception as exc:                       # 小棍只是显示层，失败不该毁掉整份 GLB
+            print(f"[zmocap] 小棍图层失败（{exc}），跳过")
 
     doc.setdefault("animations", [])
     doc["animations"].append({"name": "zmocap", "samplers": samplers, "channels": channels})

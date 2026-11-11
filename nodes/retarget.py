@@ -216,6 +216,10 @@ class _Appender:
 
     def add_floats(self, array, type_: str, minmax: bool = False) -> int:
         array = np.asarray(array, dtype=np.float32)
+        width = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT4": 16}.get(type_)
+        actual = 1 if array.ndim == 1 else array.shape[-1]
+        if width is not None and actual != width:
+            raise ValueError(f"add_floats: 数据有 {actual} 列，但声明为 {type_}（{width} 列）")
         view = self.add_view(array.tobytes())
         accessor = {
             "bufferView": view,

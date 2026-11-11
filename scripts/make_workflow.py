@@ -4,10 +4,10 @@
 
     LoadVideo → GetVideoComponents → ZMocapTrack / ZMocapFrames / ZMocapModels
       → ZMocapSapiens2Keypoints / ZMocapSam3DBodyFeatures / ZMocapHaMeRHandFeatures
-      → ZMocapExMR → ZMocapSMPL2SOMA → ZMocapSOMA2VRM → ZMocapRig ← ZMocapVRMLoader
+      → ZMocapExMR → ZMocapSMPL2SOMA → ZMocapSOMA2VRM → ZMocapVRMPreviewer ← ZMocapVRMLoader
                     └→ ZMocapExport
 
-转换类节点单进单出、只处理 motion；角色只在 ZMocapRig 这一步出现。
+转换类节点单进单出、只处理 motion；角色只在 ZMocap VRM Previewer 这一步出现。
 
 用法::
 
@@ -117,8 +117,8 @@ def build(video: str = "zmocap_test.mp4", character: str = "(none / built-in ske
                     outputs=[("motion", "ZMOCAP_MOTION")])
     b.link(to_soma, 0, to_vrm, 0, "ZMOCAP_MOTION")
 
-    # 绑定 + 写文件：唯一需要角色的节点
-    rig = b.node("ZMocapRig", (2580, 80), (340, 120), ["zmocap_rig", True],
+    # 绑定 + 写文件 + 预览：唯一需要角色的节点（skinned 关掉就看骨骼小棍）
+    rig = b.node("ZMocapVRMPreviewer", (2580, 80), (340, 120), ["zmocap_vrm", True],
                  inputs=[("motion", "ZMOCAP_MOTION"), ("character", "ZMOCAP_CHARACTER")],
                  outputs=[("glb_path", "STRING")])
     b.link(to_vrm, 0, rig, 0, "ZMOCAP_MOTION")

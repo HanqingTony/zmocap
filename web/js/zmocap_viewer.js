@@ -137,15 +137,19 @@ export function createViewer(container) {
       }
     },
 
-    /** 显示层切换：skinned 显示蒙皮网格，bones 只显示骨骼点/线。 */
+    /** 显示层切换：skinned 显示蒙皮网格，bones 只显示骨骼小棍/点线。 */
     setLayer(layer) {
       this.layer = layer;
       if (!current) return;
       current.traverse((object) => {
-        const boneLayer = object.userData?.zmocapBone === true ||
+        const isStick = typeof object.name === "string" && object.name.startsWith("zmocap_stick");
+        const boneLayer = isStick || object.userData?.zmocapBone === true ||
           object.userData?.zmocapBone === "true";
-        if (object.isSkinnedMesh || object.isMesh) {
-          object.visible = boneLayer ? layer === "bones" : layer === "skinned";
+        if (boneLayer) {
+          object.visible = layer === "bones";
+        } else if (object.isSkinnedMesh || object.isMesh) {
+          // 骨骼视图下隐藏角色蒙皮，避免"皮肤和棍子叠在一起"
+          object.visible = layer === "skinned";
         } else if (object.isPoints || object.isLine) {
           object.visible = layer === "bones";
         }

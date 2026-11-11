@@ -127,10 +127,11 @@ def bind(vrm_motion: dict, character: str) -> dict:
     }
 
 
-def write_character_glb(vrm_motion: dict, character: str, out_path, fps: float | None = None):
+def write_character_glb(vrm_motion: dict, character: str, out_path, fps: float | None = None,
+                        sticks: bool = True):
     """绑定并写出带动画的 GLB；返回 (路径, 绑定报告)。"""
     retargeted = bind(vrm_motion, character)
-    path = write_animation(character, out_path, retargeted, fps or vrm_motion["fps"])
+    path = write_animation(character, out_path, retargeted, fps or vrm_motion["fps"], sticks=sticks)
     return path, retargeted["report"]
 
 

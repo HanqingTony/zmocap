@@ -5,7 +5,7 @@
     LoadVideo → Video Slice → VideoFrameSample → GetVideoComponents   (ComfyUI 官方)
       → ZMocapTrack → ZMocapFrames
       → ZMocapSapiens2Keypoints → ZMocapSam3DBodyFeatures → ZMocapHaMeRHandFeatures
-      → ZMocapExMR → ZMocapRig ← ZMocapVRMLoader（→ 官方 Preview3D）→ ZMocapExport
+      → ZMocapExMR → SMPL2SOMA → SOMA2VRM → ZMocapVRMPreviewer ← ZMocapVRMLoader（→ 官方 Preview3D）→ ZMocapExport
 
 角色加载与绑定预览彻底解耦：VRM Loader 只负责“载入角色”，Rig 只负责“动作 + 角色 → GLB”。
 """
@@ -21,7 +21,7 @@ from .keypoints import ZMocapSapiens2Keypoints
 from .loader import ZMocapModels
 from .video import ZMocapLoadVideo
 from .probe import ZMocapEnvironment
-from .retarget import ZMocapRig
+from .previewer import ZMocapSMPLPreviewer, ZMocapVRMPreviewer
 from .track import ZMocapTrack
 
 NODE_CLASS_MAPPINGS = {
@@ -35,7 +35,8 @@ NODE_CLASS_MAPPINGS = {
     "ZMocapSam3DBodyFeatures": ZMocapSam3DBodyFeatures,
     "ZMocapHaMeRHandFeatures": ZMocapHaMeRHandFeatures,
     "ZMocapExMR": ZMocapExMR,
-    "ZMocapRig": ZMocapRig,
+    "ZMocapSMPLPreviewer": ZMocapSMPLPreviewer,
+    "ZMocapVRMPreviewer": ZMocapVRMPreviewer,
     "ZMocapSMPL2SOMA": ZMocapSMPL2SOMA,
     "ZMocapSOMA2VRM": ZMocapSOMA2VRM,
     "ZMocapVRMLoader": ZMocapVRMLoader,
@@ -54,7 +55,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ZMocapSam3DBodyFeatures": "zmocap SAM3D Body Features",
     "ZMocapHaMeRHandFeatures": "zmocap HaMeR Hand Features",
     "ZMocapExMR": "zmocap ExMR Solve",
-    "ZMocapRig": "zmocap Rig (GLB)",
+    "ZMocapSMPLPreviewer": "zmocap SMPL Previewer",
+    "ZMocapVRMPreviewer": "zmocap VRM Previewer",
     "ZMocapSMPL2SOMA": "zmocap SMPL2SOMA",
     "ZMocapSOMA2VRM": "zmocap SOMA2VRM",
     "ZMocapVRMLoader": "zmocap VRM Loader",
