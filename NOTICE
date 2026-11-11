@@ -1,0 +1,10 @@
+zmocap
+Copyright (c) 2026 HanqingTony
+Licensed under the MIT License (see LICENSE).
+
+Vendored third-party components (added later) keep their original licenses:
+
+- ExMR            — see vendor/ExMR/LICENSE and vendor/ExMR/THIRD_PARTY_NOTICES.md
+- KimodoMotionCorrection — see its upstream LICENSE
+- Sapiens2 / HaMeR — see their respective upstream licenses
+- SMPL-X body model — requires a license from Max Planck Institute

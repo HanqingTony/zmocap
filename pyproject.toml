@@ -1,0 +1,22 @@
+[project]
+name = "zmocap"
+description = "Video to 3D skeleton animation for ComfyUI (single env, ComfyUI-native VRAM management)"
+version = "0.1.0"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/HanqingTony/zmocap"
+
+[tool.comfy]
+PublisherId = "hanqingtony"
+DisplayName = "zmocap"
+Icon = ""
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["nodes"]

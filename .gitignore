@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+.venv/
+vendor/
+models/
+.DS_Store

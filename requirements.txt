@@ -1,0 +1,7 @@
+# zmocap 不引入独立运行环境：依赖装进 ComfyUI 自己的 Python 环境。
+# 第一阶段（ExMR 推理）需要的包，等节点落地时再取消注释：
+# ultralytics
+# smplx
+# PyTurboJPEG
+# yacs
+# chumpy
