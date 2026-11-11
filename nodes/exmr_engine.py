@@ -58,9 +58,15 @@ def build_assets(models_root: Path, vendor: Path, assets: Path | None = None) ->
     if missing:
         raise FileNotFoundError("模型缺失，请放到 models/zmocap/：" + ", ".join(missing))
 
-    for path in (vendor, vendor / "third_party/sapiens2", vendor / "third_party/hamer"):
+    support = Path(__file__).resolve().parent.parent / "support"
+    for path in (vendor, vendor / "third_party/sapiens2", vendor / "third_party/hamer", support):
         if str(path) not in sys.path:
             sys.path.insert(0, str(path))
+
+    # 让 vendored 代码用我们自己的助手，而不是原程序的私有包
+    import vendor_patch
+
+    vendor_patch.patch(vendor, support, quiet=True)
     os.environ.setdefault("WANDB_MODE", "disabled")
     os.environ.setdefault("PYTHONNOUSERSITE", "1")
 
