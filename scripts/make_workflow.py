@@ -107,22 +107,11 @@ def build(video: str = "zmocap_test.mp4", character: str = "(none / built-in ske
                     outputs=[("character", "ZMOCAP_CHARACTER"), ("glb_path", "STRING")])
 
     # 纯 motion 的格式转换：SMPL-X → SOMA → 标准 humanoid，全程不碰角色
-    to_soma = b.node("ZMocapSMPL2SOMA", (1900, 80), (300, 70), [],
+    # 预览：先用身份自带的 SMPL-X 网格做对照（零重定向，参数与网格同源）
+    preview = b.node("ZMocapSMPLPreviewer", (2240, 80), (340, 120), ["zmocap_smpl", True],
                      inputs=[("motion", "ZMOCAP_MOTION")],
-                     outputs=[("motion", "ZMOCAP_MOTION")])
-    b.link(exmr, 0, to_soma, 0, "ZMOCAP_MOTION")
-
-    to_vrm = b.node("ZMocapSOMA2VRM", (2240, 80), (300, 70), [],
-                    inputs=[("motion", "ZMOCAP_MOTION")],
-                    outputs=[("motion", "ZMOCAP_MOTION")])
-    b.link(to_soma, 0, to_vrm, 0, "ZMOCAP_MOTION")
-
-    # 绑定 + 写文件 + 预览：唯一需要角色的节点（skinned 关掉就看骨骼小棍）
-    rig = b.node("ZMocapVRMPreviewer", (2580, 80), (340, 120), ["zmocap_vrm", True],
-                 inputs=[("motion", "ZMOCAP_MOTION"), ("character", "ZMOCAP_CHARACTER")],
-                 outputs=[("glb_path", "STRING")])
-    b.link(to_vrm, 0, rig, 0, "ZMOCAP_MOTION")
-    b.link(loader, 0, rig, 1, "ZMOCAP_CHARACTER")
+                     outputs=[("glb_path", "STRING")])
+    b.link(exmr, 0, preview, 0, "ZMOCAP_MOTION")
 
     export = b.node("ZMocapExport", (2280, 720), (330, 130), ["zmocap_motion", True],
                     inputs=[("motion", "ZMOCAP_MOTION")], outputs=[("saved_path", "STRING")])

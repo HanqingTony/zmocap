@@ -59,11 +59,27 @@ class ZMocapSMPLPreviewer:
 
     def run(self, motion, filename, character=None, skinned=True):
         from .retarget import build_glb
+        from .smpl_mesh import write_smpl_glb
 
         skeleton = str(motion.get("skeleton") or ("smplx" if "params" in motion else "unknown"))
         if skeleton != "smplx":
             raise ValueError(f"SMPL Previewer 需要 SMPL-X 运动，收到 {skeleton}")
         target = _character_path(character)
+
+        if not target:
+            # 自带 SMPL-X 网格：参数与网格同源，零重定向，用作对照基准
+            outdir = _output_dir()
+            frames = int(np.asarray(motion["params"]["global_orient"]).shape[0])
+            digest = _digest(["smplx", str(frames), f"{float(motion.get('fps', 30.0)):.3f}"])
+            path, info = write_smpl_glb(motion, outdir / f"{filename}_{digest}.glb")
+            relative = path.relative_to(outdir).as_posix()
+            return {
+                "ui": {"zmocap_glb": [relative],
+                       "zmocap_layer": ["skinned" if skinned else "bones"],
+                       "zmocap_rig": [{"path": str(path), **info}]},
+                "result": (relative,),
+            }
+
         joints = np.asarray(motion["joints"])
         digest = _digest([
             "smpl", str(joints.shape[0]), f"{float(motion.get('fps', 30.0)):.3f}",
