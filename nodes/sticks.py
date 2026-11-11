@@ -72,8 +72,8 @@ def _align_y(direction: np.ndarray) -> np.ndarray:
     return np.eye(3) + np.sin(angle) * k + (1 - np.cos(angle)) * (k @ k)
 
 
-def add_stick_layer(appender, doc: dict, bones: dict, parents, by_name: dict,
-                    head_of, color=(0.95, 0.55, 0.15), radius_of=None) -> int:
+def add_stick_layer(appender, doc: dict, bones, parents, by_name: dict,
+                    color=(0.95, 0.55, 0.15), radius_of=None) -> int:
     """给 `bones`（名字 → rest 4x4，Blender 口径）各加一根小棍，返回新增的棍数。
 
     `parents` 允许传 dict（下标 → 父下标）或 list（下标即子下标）；
@@ -134,38 +134,30 @@ def add_stick_layer(appender, doc: dict, bones: dict, parents, by_name: dict,
         node_index = by_name.get(name)
         if node_index is None:
             continue
-        rest = np.asarray(bones[name]["rest"], dtype=np.float64)
-        direction_zup = rest[:3, 1]
-        length = float(np.linalg.norm(np.asarray(bones[name]["tail"]) - np.asarray(bones[name]["head"])))
-        length = max(length, 0.01)
-        world_rest = _world_of(nodes, parent_map, node_index, cache)
-        try:
-            inv = np.linalg.inv(world_rest)
-        except np.linalg.LinAlgError:
+        # 骨骼轴直接取"主子的局部平移方向"——与导出坐标系无关，无需任何换算。
+        parent_node = nodes[node_index]
+        children = [c for c in parent_node.get("children", []) if c < len(nodes)]
+        direction = None
+        length = 0.0
+        for child in children:
+            offset = np.asarray(nodes[child].get("translation", [0, 0, 0]), dtype=np.float64)
+            norm = np.linalg.norm(offset)
+            if norm > length:
+                direction, length = offset / norm, norm
+        if direction is None or length < 1e-6:
             continue
-        from_dump = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])  # Z-up → Y-up
-        direction = from_dump @ direction_zup
-        head = from_dump @ np.asarray(head_of(name), dtype=np.float64)
-        tail = head + direction * length
-        local_head = (inv @ np.append(head, 1.0))[:3]
-        local_tail = (inv @ np.append(tail, 1.0))[:3]
-        axis = local_tail - local_head
-        norm = np.linalg.norm(axis)
-        if norm < 1e-6:
-            continue
-        rotation = _align_y(axis)
         radius = radius_of(name) if radius_of else 0.012
         node = {
             "name": f"zmocap_stick_{name}",
             "mesh": mesh_index,
-            "translation": [float(v) for v in local_head],
-            "rotation": _quat_xyzw(rotation),
-            "scale": [float(radius), float(norm), float(radius)],
+            "translation": [0.0, 0.0, 0.0],
+            "rotation": _quat_xyzw(_align_y(direction)),
+            "scale": [float(radius), float(length), float(radius)],
         }
         nodes.append(node)
         child_index = len(nodes) - 1
         parent_map[child_index] = node_index
-        nodes[node_index].setdefault("children", []).append(child_index)
+        parent_node.setdefault("children", []).append(child_index)
         added += 1
     return added
 

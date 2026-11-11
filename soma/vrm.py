@@ -377,8 +377,7 @@ def write_animation(character: str | Path, out_path: str | Path, retargeted: dic
 
         try:
             stick_bones = {name: bones[name] for name in retargeted["world_rotation"] if name in bones}
-            count = add_stick_layer(appender, doc, stick_bones, parents, by_name,
-                                    head_of=lambda name: stick_bones[name]["head"])
+            count = add_stick_layer(appender, doc, stick_bones, parents, by_name)
             print(f"[zmocap] 加骨骼小棍 {count} 根")
         except Exception as exc:                       # 小棍只是显示层，失败不该毁掉整份 GLB
             print(f"[zmocap] 小棍图层失败（{exc}），跳过")

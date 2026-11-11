@@ -131,6 +131,8 @@ def write_character_glb(vrm_motion: dict, character: str, out_path, fps: float |
                         sticks: bool = True):
     """绑定并写出带动画的 GLB；返回 (路径, 绑定报告)。"""
     retargeted = bind(vrm_motion, character)
+    if "dump" not in retargeted or "world_rotation" not in retargeted:
+        raise RuntimeError("绑定结果缺少写 GLB 需要的数据")
     path = write_animation(character, out_path, retargeted, fps or vrm_motion["fps"], sticks=sticks)
     return path, retargeted["report"]
 
