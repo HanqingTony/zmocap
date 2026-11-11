@@ -212,7 +212,8 @@ def _quat_mul(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     ], axis=-1)
 
 
-def _add_animation(appender: _Appender, doc: dict, mapping: dict, quats: np.ndarray, fps: float) -> bool:
+def _add_animation(appender: _Appender, doc: dict, mapping: dict, quats: np.ndarray,
+                   fps: float, root_track=None) -> bool:
     """给映射到的骨骼节点加 rotation 动画轨道。
 
     SMPL-X 的局部旋转是“相对静止姿势的增量”，而角色骨骼的静止旋转通常不是单位
@@ -234,23 +235,47 @@ def _add_animation(appender: _Appender, doc: dict, mapping: dict, quats: np.ndar
                          "target": {"node": int(node_index), "path": "rotation"}})
     if not channels:
         return False
+
+    # 根骨（pelvis）跟位移：相对首帧的增量叠加到骨骼自身的静止平移上，
+    # 既不会在原点抽搐，也不会先跳到世界原点。
+    pelvis = mapping.get(0)
+    if pelvis is not None and root_track is not None:
+        track = np.asarray(root_track, dtype=np.float64)
+        rest_t = np.asarray(doc["nodes"][pelvis].get("translation") or [0.0, 0.0, 0.0],
+                            dtype=np.float64)
+        values = (rest_t.reshape(1, 3) + (track - track[0])).astype(np.float32)
+        value_accessor = appender.add_floats(values, "VEC3")
+        samplers.append({"input": time_accessor, "output": value_accessor,
+                         "interpolation": "LINEAR"})
+        channels.append({"sampler": len(samplers) - 1,
+                         "target": {"node": int(pelvis), "path": "translation"}})
+
     doc.setdefault("animations", []).append(
         {"name": "zmocap", "samplers": samplers, "channels": channels}
     )
     return True
 
 
-def _build_mannequin(appender: _Appender, joints: np.ndarray, fps: float) -> dict:
-    """兜底骨架：55 个球 + 每帧平移动画（不依赖任何外部模型）。"""
+# SMPL-X 55 关节的父关节索引（-1 为根骨）
+SMPLX_PARENTS = [-1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9, 12, 13, 14, 16, 17,
+                 18, 19, 15, 15, 15, 20, 25, 26, 20, 28, 29, 20, 31, 32, 20, 34, 35, 20,
+                 37, 38, 21, 40, 41, 21, 43, 44, 21, 46, 47, 21, 49, 50, 21, 52, 53]
+
+
+def _build_mannequin(appender: _Appender, joints: np.ndarray, quats: np.ndarray, fps: float) -> dict:
+    """兜底骨架：真正的骨骼层级 + 每关节一个球，静止状态也看得见。
+
+    结构：J0(root) → J1 → … 层级骨骼，每个骨骼下挂一个球体网格；
+    动画只写旋转（根骨额外写世界平移），球跟着骨头走，不需要蒙皮。
+    """
+    import trimesh
+
     doc = appender.doc
     doc.setdefault("nodes", [])
     doc.setdefault("meshes", [])
     doc.setdefault("scenes", [{"nodes": []}])
 
-    # 一个低模球体反复复用
-    import trimesh
-
-    sphere = trimesh.creation.icosphere(subdivisions=1, radius=0.03)
+    sphere = trimesh.creation.icosphere(subdivisions=1, radius=0.05)
     positions = np.asarray(sphere.vertices, dtype=np.float32)
     indices = np.asarray(sphere.faces, dtype=np.uint32).reshape(-1)
     pos_accessor = appender.add_floats(positions, "VEC3", minmax=True)
@@ -261,23 +286,49 @@ def _build_mannequin(appender: _Appender, joints: np.ndarray, fps: float) -> dic
     doc["meshes"].append({"primitives": [{"attributes": {"POSITION": pos_accessor},
                                           "indices": index_accessor, "mode": 4}]})
 
+    rest = np.asarray(joints[0], dtype=np.float64)
+    bone_ids = []
+    for index in range(55):
+        parent = SMPLX_PARENTS[index]
+        offset = rest[index] - (rest[parent] if parent >= 0 else 0.0)
+        doc["nodes"].append({
+            "name": f"J{index}",
+            "translation": [float(v) for v in offset],
+            "rotation": [0.0, 0.0, 0.0, 1.0],
+        })
+        bone_ids.append(len(doc["nodes"]) - 1)
+
+    # 每个骨骼下挂一个球
+    for index in range(55):
+        doc["nodes"].append({"name": f"M{index}", "mesh": 0})
+        sphere_id = len(doc["nodes"]) - 1
+        doc["nodes"][bone_ids[index]].setdefault("children", []).append(sphere_id)
+
+    # 骨骼层级
+    for index in range(55):
+        parent = SMPLX_PARENTS[index]
+        if parent >= 0:
+            doc["nodes"][bone_ids[parent]].setdefault("children", []).append(bone_ids[index])
+    doc["scenes"][0]["nodes"] = [bone_ids[0]]
+
     count = joints.shape[0]
     times = (np.arange(count, dtype=np.float32) / float(fps))
     time_accessor = appender.add_floats(times, "SCALAR", minmax=True)
 
-    node_ids = []
-    for index in range(55):
-        doc["nodes"].append({"name": f"J{index}", "mesh": 0})
-        node_ids.append(len(doc["nodes"]) - 1)
-    doc["scenes"][0]["nodes"] = [node_ids[0]]
-
     samplers, channels = [], []
     for index in range(55):
-        track = np.asarray(joints[:, index, :], dtype=np.float32)
-        accessor = appender.add_floats(track, "VEC3")
+        values = np.asarray(quats[:, index, :], dtype=np.float32)
+        accessor = appender.add_floats(values, "VEC4")
         samplers.append({"input": time_accessor, "output": accessor, "interpolation": "LINEAR"})
         channels.append({"sampler": len(samplers) - 1,
-                         "target": {"node": node_ids[index], "path": "translation"}})
+                         "target": {"node": bone_ids[index], "path": "rotation"}})
+
+    # 根骨世界位移
+    accessor = appender.add_floats(np.asarray(joints[:, 0], dtype=np.float32), "VEC3")
+    samplers.append({"input": time_accessor, "output": accessor, "interpolation": "LINEAR"})
+    channels.append({"sampler": len(samplers) - 1,
+                     "target": {"node": bone_ids[0], "path": "translation"}})
+
     doc.setdefault("animations", []).append(
         {"name": "zmocap", "samplers": samplers, "channels": channels}
     )
@@ -293,6 +344,10 @@ def build_glb(motion: dict, out_path: Path, character: str = "", mode: str = "au
     quats = local_rotations(motion["params"])
 
     character = str(character or "").strip()
+    if character and mode != "mannequin":
+        from .character import resolve_character
+
+        character = resolve_character(character)
     info = {"mode": "mannequin", "bones": 0, "frames": int(joints.shape[0])}
 
     if character and mode != "mannequin":
@@ -300,7 +355,7 @@ def build_glb(motion: dict, out_path: Path, character: str = "", mode: str = "au
             doc, binary = _read_glb(Path(character).expanduser())
             appender = _Appender(doc, binary)
             mapping = _bone_map(doc)
-            if mapping and _add_animation(appender, doc, mapping, quats, fps):
+            if mapping and _add_animation(appender, doc, mapping, quats, fps, root_track=joints[:, 0]):
                 appender.finish()
                 info.update({"mode": "character", "bones": len(mapping)})
                 return _write_glb(Path(out_path), doc, appender.binary), info
@@ -310,8 +365,9 @@ def build_glb(motion: dict, out_path: Path, character: str = "", mode: str = "au
 
     doc = {"asset": {"version": "2.0", "generator": "zmocap"}}
     appender = _Appender(doc, bytearray())
-    _build_mannequin(appender, joints, fps)
+    _build_mannequin(appender, joints, quats, fps)
     appender.finish()
+    info.update({"mode": "mannequin", "bones": len(SMPLX_PARENTS)})
     return _write_glb(Path(out_path), doc, appender.binary), info
 
 
@@ -320,14 +376,17 @@ class ZMocapRig:
 
     @classmethod
     def INPUT_TYPES(cls):
+        from .character import character_choices
+
         return {
             "required": {
                 "motion": ("ZMOCAP_MOTION",),
                 "filename": ("STRING", {"default": "zmocap_rig"}),
+                "character": (character_choices(), {"default": "(mannequin / built-in skeleton)"}),
             },
             "optional": {
-                "character": ("STRING", {"default": "", "multiline": False,
-                                         "tooltip": "角色 GLB/VRM 路径；留空用自带骨架"}),
+                "character_path": ("STRING", {"default": "", "multiline": False,
+                                               "tooltip": "角色目录之外的绝对路径（留空则用上面的下拉框）"}),
                 "mode": (["auto", "mannequin"], {"default": "auto"}),
             },
         }
@@ -338,10 +397,15 @@ class ZMocapRig:
     FUNCTION = "run"
     CATEGORY = "zmocap"
 
-    def run(self, motion, filename, character="", mode="auto"):
+    def run(self, motion, filename, character="(mannequin / built-in skeleton)",
+            character_path="", mode="auto"):
         import folder_paths
 
+        target = str(character_path or "").strip() or character
         outdir = Path(folder_paths.get_output_directory())
-        path, info = build_glb(motion, outdir / f"{filename}.glb", character=character, mode=mode)
-        print(f"[zmocap] rig {info['mode']} → {path} ({info['bones']} bones, {info['frames']} frames)")
-        return {"ui": {"zmocap_rig": [{"path": str(path), **info}]}, "result": (str(path),)}
+        path, info = build_glb(motion, outdir / f"{filename}.glb", character=target, mode=mode)
+        print(f"[zmocap] rig {info['mode']} -> {path} ({info['bones']} bones, {info['frames']} frames)")
+        # Preview3D 只认 output 目录下的相对文件名（前端用 /view?filename=... 加载），
+        # 绝对路径会 404 变成空白预览，所以返回值给相对路径，绝对路径放在 ui 里。
+        relative = path.relative_to(Path(folder_paths.get_output_directory())).as_posix()
+        return {"ui": {"zmocap_rig": [{"path": str(path), **info}]}, "result": (relative,)}

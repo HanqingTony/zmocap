@@ -1,8 +1,8 @@
-"""生成 ComfyUI 工作流模板（UI 格式），输出到桌面。
+"""生成 ComfyUI 工作流模板（UI 格式），默认写到桌面。
 
 用法::
 
-    python scripts/make_workflow.py ~/Desktop/zmocap-exmr.json [视频文件名]
+    python scripts/make_workflow.py <输出路径> [视频文件名] [角色文件名]
 """
 
 from __future__ import annotations
@@ -11,144 +11,118 @@ import json
 import sys
 from pathlib import Path
 
-BONES_UI = None
+MANNEQUIN = "(mannequin / built-in skeleton)"
 
 
-def build(video: str = "zmocap_test.mp4") -> dict:
-    nodes: list[dict] = []
-    links: list[list] = []
-    counter = {"link": 0, "node": 0}
+class Builder:
+    def __init__(self) -> None:
+        self.nodes: list[dict] = []
+        self.links: list[list] = []
 
-    def add(kind, pos, size, widgets, outputs=None, inputs=None, title=None):
-        node_id = counter["node"]
-        counter["node"] += 1
-        node = {
-            "id": node_id,
-            "type": kind,
-            "pos": list(pos),
-            "size": list(size),
-            "flags": {},
-            "order": node_id,
-            "mode": 0,
-            "inputs": inputs or [],
-            "outputs": outputs or [],
+    def node(self, kind, pos, size, widgets=None, inputs=(), outputs=(), title=None):
+        node_id = len(self.nodes)
+        self.nodes.append({
+            "id": node_id, "type": kind, "pos": list(pos), "size": list(size),
+            "flags": {}, "order": node_id, "mode": 0,
+            "inputs": [{"name": n, "type": t, "link": None} for n, t in inputs],
+            "outputs": [{"name": n, "type": t, "links": []} for n, t in outputs],
             "properties": {"Node name for S&R": kind},
-        }
-        if widgets:
-            node["widgets_values"] = widgets
-        if title:
-            node["title"] = title
-        nodes.append(node)
+            "widgets_values": widgets if widgets is not None else [],
+            **({"title": title} if title else {}),
+        })
         return node_id
 
-    def link(src, src_slot, dst, dst_slot, type_):
-        counter["link"] += 1
-        links.append([counter["link"], src, src_slot, dst, dst_slot, type_])
-        return counter["link"]
+    def link(self, src, slot, dst, port, type_):
+        self.links.append([len(self.links) + 1, src, slot, dst, port, type_])
+        self.nodes[dst]["inputs"][port]["link"] = self.links[-1][0]
+        self.nodes[src]["outputs"][slot]["links"].append(self.links[-1][0])
 
-    # 1) 官方视频节点
-    load = add("LoadVideo", (40, 60), (300, 90), [video],
-               outputs=[{"name": "VIDEO", "type": "VIDEO", "links": []}])
-    get = add("GetVideoComponents", (400, 60), (300, 120), [],
-              outputs=[{"name": "IMAGE", "type": "IMAGE", "links": []},
-                       {"name": "AUDIO", "type": "AUDIO", "links": []},
-                       {"name": "FPS", "type": "FLOAT", "links": []}],
-              inputs=[{"name": "video", "type": "VIDEO", "link": None}])
-    link(load, 0, get, 0, "VIDEO")
-    nodes[get]["inputs"][0]["link"] = links[-1][0]
-    nodes[load]["outputs"][0]["links"].append(links[-1][0])
+    def dump(self) -> dict:
+        return {"last_node_id": len(self.nodes) - 1, "last_link_id": len(self.links),
+                "nodes": self.nodes, "links": self.links, "groups": [], "config": {},
+                "extra": {}, "version": 0.4}
 
-    # 2) zmocap：跟踪 / 帧落盘 / 模型
-    track = add("ZMocapTrack", (760, 60), (300, 170), ["yolov8x.pt", 0.3, 55.0, 0],
-                outputs=[{"name": "tracks", "type": "ZMOCAP_TRACKS", "links": []}],
-                inputs=[{"name": "images", "type": "IMAGE", "link": None}])
-    frames = add("ZMocapFrames", (760, 300), (300, 100), [95],
-                 outputs=[{"name": "frames", "type": "ZMOCAP_FRAMES", "links": []}],
-                 inputs=[{"name": "images", "type": "IMAGE", "link": None}])
-    models = add("ZMocapModels", (760, 450), (300, 100), ["", True],
-                 outputs=[{"name": "models", "type": "ZMOCAP_MODELS", "links": []}])
 
-    for dst, slot in ((track, 0), (frames, 0)):
-        link(get, 0, dst, slot, "IMAGE")
-        nodes[dst]["inputs"][slot]["link"] = links[-1][0]
-        nodes[get]["outputs"][0]["links"].append(links[-1][0])
+def build(video: str = "zmocap_test.mp4", character: str = "Sendagaya_Shino.vrm") -> dict:
+    b = Builder()
 
-    # 3) 三个特征阶段
-    keypoints = add("ZMocapSapiens2Keypoints", (1120, 60), (320, 120), [True],
-                    outputs=[{"name": "keypoints", "type": "ZMOCAP_KEYPOINTS", "links": []}],
-                    inputs=[{"name": "frames", "type": "ZMOCAP_FRAMES", "link": None},
-                            {"name": "tracks", "type": "ZMOCAP_TRACKS", "link": None},
-                            {"name": "models", "type": "ZMOCAP_MODELS", "link": None}])
-    body = add("ZMocapSam3DBodyFeatures", (1120, 240), (320, 120), [True],
-               outputs=[{"name": "body_features", "type": "ZMOCAP_BODY_FEATURES", "links": []}],
-               inputs=[{"name": "frames", "type": "ZMOCAP_FRAMES", "link": None},
-                       {"name": "tracks", "type": "ZMOCAP_TRACKS", "link": None},
-                       {"name": "models", "type": "ZMOCAP_MODELS", "link": None}])
-    hands = add("ZMocapHaMeRHandFeatures", (1120, 420), (320, 140), [True],
-                outputs=[{"name": "hand_features", "type": "ZMOCAP_HAND_FEATURES", "links": []}],
-                inputs=[{"name": "frames", "type": "ZMOCAP_FRAMES", "link": None},
-                        {"name": "tracks", "type": "ZMOCAP_TRACKS", "link": None},
-                        {"name": "models", "type": "ZMOCAP_MODELS", "link": None},
-                        {"name": "keypoints", "type": "ZMOCAP_KEYPOINTS", "link": None}])
+    load = b.node("LoadVideo", (40, 80), (320, 100), [video],
+                  outputs=[("VIDEO", "VIDEO")])
+    parts = b.node("GetVideoComponents", (400, 80), (320, 130), [],
+                   inputs=[("video", "VIDEO")],
+                   outputs=[("IMAGE", "IMAGE"), ("AUDIO", "AUDIO"), ("FPS", "FLOAT"),
+                            ("WIDTH", "INT"), ("HEIGHT", "INT")])
+    b.link(load, 0, parts, 0, "VIDEO")
 
-    def wire(src, src_slot, dst, dst_slot, type_):
-        link(src, src_slot, dst, dst_slot, type_)
-        nodes[dst]["inputs"][dst_slot]["link"] = links[-1][0]
-        nodes[src]["outputs"][src_slot]["links"].append(links[-1][0])
+    track = b.node("ZMocapTrack", (760, 80), (310, 180), ["yolov8x.pt", 0.3, 55.0, 0],
+                   inputs=[("images", "IMAGE")], outputs=[("tracks", "ZMOCAP_TRACKS")])
+    frames = b.node("ZMocapFrames", (760, 300), (310, 100), [95],
+                    inputs=[("images", "IMAGE")], outputs=[("frames", "ZMOCAP_FRAMES")])
+    models = b.node("ZMocapModels", (760, 440), (310, 100), ["", True],
+                    outputs=[("models", "ZMOCAP_MODELS")])
+    b.link(parts, 0, track, 0, "IMAGE")
+    b.link(parts, 0, frames, 0, "IMAGE")
 
-    for target in (keypoints, body, hands):
-        wire(frames, 0, target, 0, "ZMOCAP_FRAMES")
-        wire(track, 0, target, 1, "ZMOCAP_TRACKS")
-        wire(models, 0, target, 2, "ZMOCAP_MODELS")
-    wire(keypoints, 0, hands, 3, "ZMOCAP_KEYPOINTS")
+    def stage(kind, pos, extra_inputs=(), extra_widgets=None, outputs=(("out", "OUT"),)):
+        node = b.node(kind, pos, (330, 140), extra_widgets if extra_widgets is not None else [True],
+                      inputs=[("frames", "ZMOCAP_FRAMES"), ("tracks", "ZMOCAP_TRACKS"),
+                              ("models", "ZMOCAP_MODELS"), *extra_inputs],
+                      outputs=list(outputs))
+        b.link(frames, 0, node, 0, "ZMOCAP_FRAMES")
+        b.link(track, 0, node, 1, "ZMOCAP_TRACKS")
+        b.link(models, 0, node, 2, "ZMOCAP_MODELS")
+        return node
 
-    # 4) 解算
-    exmr = add("ZMocapExMR", (1500, 60), (320, 220), [24.0, True, True],
-               outputs=[{"name": "motion", "type": "ZMOCAP_MOTION", "links": []}],
-               inputs=[{"name": "keypoints", "type": "ZMOCAP_KEYPOINTS", "link": None},
-                       {"name": "body_features", "type": "ZMOCAP_BODY_FEATURES", "link": None},
-                       {"name": "hand_features", "type": "ZMOCAP_HAND_FEATURES", "link": None},
-                       {"name": "tracks", "type": "ZMOCAP_TRACKS", "link": None},
-                       {"name": "models", "type": "ZMOCAP_MODELS", "link": None},
-                       {"name": "fps", "type": "FLOAT", "link": None}])
-    wire(keypoints, 0, exmr, 0, "ZMOCAP_KEYPOINTS")
-    wire(body, 0, exmr, 1, "ZMOCAP_BODY_FEATURES")
-    wire(hands, 0, exmr, 2, "ZMOCAP_HAND_FEATURES")
-    wire(track, 0, exmr, 3, "ZMOCAP_TRACKS")
-    wire(models, 0, exmr, 4, "ZMOCAP_MODELS")
-    wire(get, 2, exmr, 5, "FLOAT")
+    keypoints = stage("ZMocapSapiens2Keypoints", (1130, 80),
+                      outputs=[("keypoints", "ZMOCAP_KEYPOINTS")])
+    body = stage("ZMocapSam3DBodyFeatures", (1130, 260),
+                 outputs=[("body_features", "ZMOCAP_BODY_FEATURES")])
+    hands = stage("ZMocapHaMeRHandFeatures", (1130, 440),
+                  extra_inputs=[("keypoints", "ZMOCAP_KEYPOINTS")],
+                  outputs=[("hand_features", "ZMOCAP_HAND_FEATURES")])
+    b.link(keypoints, 0, hands, 3, "ZMOCAP_KEYPOINTS")
 
-    # 5) 绑定 + 预览 + 导出
-    rig = add("ZMocapRig", (1880, 60), (320, 140), ["zmocap_rig", "", "auto"],
-              outputs=[{"name": "glb_path", "type": "STRING", "links": []}],
-              inputs=[{"name": "motion", "type": "ZMOCAP_MOTION", "link": None}])
-    wire(exmr, 0, rig, 0, "ZMOCAP_MOTION")
+    exmr = b.node("ZMocapExMR", (1510, 80), (330, 240), [24.0, True, True],
+                  inputs=[("keypoints", "ZMOCAP_KEYPOINTS"), ("body_features", "ZMOCAP_BODY_FEATURES"),
+                          ("hand_features", "ZMOCAP_HAND_FEATURES"), ("tracks", "ZMOCAP_TRACKS"),
+                          ("models", "ZMOCAP_MODELS"), ("fps", "FLOAT")],
+                  outputs=[("motion", "ZMOCAP_MOTION")])
+    b.link(keypoints, 0, exmr, 0, "ZMOCAP_KEYPOINTS")
+    b.link(body, 0, exmr, 1, "ZMOCAP_BODY_FEATURES")
+    b.link(hands, 0, exmr, 2, "ZMOCAP_HAND_FEATURES")
+    b.link(track, 0, exmr, 3, "ZMOCAP_TRACKS")
+    b.link(models, 0, exmr, 4, "ZMOCAP_MODELS")
+    b.link(parts, 2, exmr, 5, "FLOAT")
 
-    preview3d = add("Preview3D", (1880, 260), (380, 420), ["zmocap_rig.glb"])
-    skeleton = add("ZMocapPreview3D", (1880, 720), (360, 420), [600],
-                   inputs=[{"name": "motion", "type": "ZMOCAP_MOTION", "link": None}])
-    wire(exmr, 0, skeleton, 0, "ZMOCAP_MOTION")
+    rig = b.node("ZMocapRig", (1900, 80), (330, 160), ["zmocap_rig", character, "", "auto"],
+                 inputs=[("motion", "ZMOCAP_MOTION")], outputs=[("glb_path", "STRING")])
+    b.link(exmr, 0, rig, 0, "ZMOCAP_MOTION")
 
-    export = add("ZMocapExport", (2240, 60), (300, 140), ["zmocap_motion", True],
-                 outputs=[{"name": "saved_path", "type": "STRING", "links": []}],
-                 inputs=[{"name": "motion", "type": "ZMOCAP_MOTION", "link": None}])
-    wire(exmr, 0, export, 0, "ZMOCAP_MOTION")
+    char_preview = b.node("ZMocapCharacterPreview", (1900, 280), (330, 80), [character],
+                          outputs=[("glb_path", "STRING")])
 
-    return {
-        "last_node_id": counter["node"] - 1,
-        "last_link_id": counter["link"],
-        "nodes": nodes,
-        "links": links,
-        "groups": [],
-        "config": {},
-        "extra": {},
-        "version": 0.4,
-    }
+    viewer_rig = b.node("Preview3D", (2280, 80), (420, 460), [""],
+                        inputs=[("model_file", "STRING")], title="Preview3D (rigged)")
+    viewer_char = b.node("Preview3D", (2280, 580), (420, 460), [""],
+                         inputs=[("model_file", "STRING")], title="Preview3D (character)")
+    b.link(rig, 0, viewer_rig, 0, "STRING")
+    b.link(char_preview, 0, viewer_char, 0, "STRING")
+
+    skeleton = b.node("ZMocapPreview3D", (1900, 420), (330, 460), [600],
+                      inputs=[("motion", "ZMOCAP_MOTION")])
+    b.link(exmr, 0, skeleton, 0, "ZMOCAP_MOTION")
+
+    export = b.node("ZMocapExport", (1900, 920), (330, 130), ["zmocap_motion", True],
+                    inputs=[("motion", "ZMOCAP_MOTION")], outputs=[("saved_path", "STRING")])
+    b.link(exmr, 0, export, 0, "ZMOCAP_MOTION")
+
+    return b.dump()
 
 
 if __name__ == "__main__":
     out = Path(sys.argv[1] if len(sys.argv) > 1 else "zmocap-exmr.json").expanduser()
     video = sys.argv[2] if len(sys.argv) > 2 else "zmocap_test.mp4"
+    character = sys.argv[3] if len(sys.argv) > 3 else "Sendagaya_Shino.vrm"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(build(video), ensure_ascii=False, indent=1), encoding="utf-8")
+    out.write_text(json.dumps(build(video, character), ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"写入 {out}")

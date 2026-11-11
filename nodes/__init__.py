@@ -9,6 +9,7 @@
 """
 
 from .body_features import ZMocapSam3DBodyFeatures
+from .character import ZMocapCharacterPreview
 from .exmr import ZMocapExMR
 from .export import ZMocapExport
 from .frames_node import ZMocapFrames, ZMocapIntrinsics
@@ -31,23 +32,26 @@ NODE_CLASS_MAPPINGS = {
     "ZMocapHaMeRHandFeatures": ZMocapHaMeRHandFeatures,
     "ZMocapExMR": ZMocapExMR,
     "ZMocapRig": ZMocapRig,
+    "ZMocapCharacterPreview": ZMocapCharacterPreview,
     "ZMocapPreview3D": ZMocapPreview3D,
     "ZMocapExport": ZMocapExport,
 }
 
+# 仅 ASCII，不带序号
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "ZMocapEnvironment": "zmocap · 环境自检",
-    "ZMocapModels": "zmocap · 模型",
-    "ZMocapTrack": "zmocap · ① 人物跟踪",
-    "ZMocapFrames": "zmocap · 帧落盘",
-    "ZMocapIntrinsics": "zmocap · 相机内参",
-    "ZMocapSapiens2Keypoints": "zmocap · ② Sapiens2 关键点",
-    "ZMocapSam3DBodyFeatures": "zmocap · ③ SAM 3D Body 特征",
-    "ZMocapHaMeRHandFeatures": "zmocap · ④ HaMeR 手部特征",
-    "ZMocapExMR": "zmocap · ⑤ ExMR 解算",
-    "ZMocapRig": "zmocap · ⑥ 角色绑定预览 (GLB)",
-    "ZMocapPreview3D": "zmocap · 骨骼预览",
-    "ZMocapExport": "zmocap · 导出 NPZ/BVH",
+    "ZMocapEnvironment": "zmocap Environment",
+    "ZMocapModels": "zmocap Models",
+    "ZMocapTrack": "zmocap Track",
+    "ZMocapFrames": "zmocap Frames",
+    "ZMocapIntrinsics": "zmocap Intrinsics",
+    "ZMocapSapiens2Keypoints": "zmocap Sapiens2 Keypoints",
+    "ZMocapSam3DBodyFeatures": "zmocap SAM3D Body Features",
+    "ZMocapHaMeRHandFeatures": "zmocap HaMeR Hand Features",
+    "ZMocapExMR": "zmocap ExMR Solve",
+    "ZMocapRig": "zmocap Rig (GLB)",
+    "ZMocapCharacterPreview": "zmocap Character Preview",
+    "ZMocapPreview3D": "zmocap Skeleton Preview",
+    "ZMocapExport": "zmocap Export NPZ/BVH",
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
