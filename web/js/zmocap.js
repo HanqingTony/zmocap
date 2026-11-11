@@ -1,133 +1,174 @@
-// zmocap 前端扩展：角色文件上传。
-//
-// ComfyUI 官方给图片/视频/音频提供了上传 widget（image_upload / video_upload / audio_upload），
-// 但 3D 文件没有对应机制。这里复用官方上传接口 `POST /upload/image`
-// （该接口不校验后缀，直接把文件存进 input/），上传成功后写进节点的下拉框并选中，
-// 交互与官方 LoadImage 的「choose file to upload」一致。
-//
-// 骨骼画布预览在 zmocap_preview.js 里，别在这里重复注册。
+/**
+ * zmocap 前端扩展：
+ * - “VRM Loader”节点内置 3D 预览：上传或下拉选择后立刻加载显示，不排队、不跑工作流；
+ * - “Rig”节点内置 3D 预览：跑完自动播放，`skinned` 开关是纯前端图层切换，即时生效。
+ */
+
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
+import { createViewer, inputFileUrl, outputFileUrl } from "./zmocap_viewer.js";
 
 const CHARACTER_NODES = new Set(["ZMocapVRMLoader"]);
-const ACCEPT = ".vrm,.glb,.gltf,.VRM,.GLB,.GLTF";
+const RIG_NODES = new Set(["ZMocapRig"]);
 
-async function uploadCharacter(file) {
-    const body = new FormData();
-    body.append("image", file, file.name);
-    body.append("type", "input");
-    body.append("overwrite", "true");
-    const response = await api.fetchApi("/upload/image", { method: "POST", body });
-    if (!response.ok) {
-        throw new Error(`上传失败 (${response.status}): ${await response.text()}`);
-    }
-    const data = await response.json();
-    return data.subfolder ? `${data.subfolder}/${data.name}` : data.name;
-}
-
-function pushChoice(widget, name) {
-    const bag = widget.options?.values ?? widget.values;
-    if (Array.isArray(bag) && !bag.includes(name)) {
-        bag.push(name);
-    }
-}
-
-function addUploadButton(node) {
-    const widget = node.widgets?.find((w) => w.name === "character");
-    if (!widget || widget.__zmocapUpload) {
-        return;
-    }
-    widget.__zmocapUpload = true;
-
-    const button = node.addWidget("button", "upload vrm/glb...", null, () => {
-        const picker = document.createElement("input");
-        picker.type = "file";
-        picker.accept = ACCEPT;
-        picker.onchange = async () => {
-            const file = picker.files?.[0];
-            if (!file) {
-                return;
-            }
-            try {
-                const name = await uploadCharacter(file);
-                pushChoice(widget, name);
-                widget.value = name;
-                widget.callback?.(name);
-                node.setDirtyCanvas(true, true);
-                console.log(`[zmocap] uploaded character: ${name}`);
-            } catch (error) {
-                console.error("[zmocap]", error);
-                alert(String(error?.message || error));
-            }
-        };
-        picker.click();
-    });
-    button.serialize = false;
+function addPreviewWidget(node, viewer, container, title) {
+  const hint = document.createElement("div");
+  hint.textContent = title;
+  hint.style.cssText =
+    "position:absolute;inset:auto 0 6px 0;text-align:center;font-size:11px;color:#8fa3b8;" +
+    "pointer-events:none;user-select:none";
+  container.appendChild(hint);
+  const widget = node.addDOMWidget("zmocap_preview", "zmocap3d", container, {
+    serialize: false,
+    hideOnZoom: false,
+    getMinHeight: () => 260,
+  });
+  widget.computeSize = (width) => [width, 268];
+  void viewer;
+  node.setSize([Math.max(node.size[0], 320), node.size[1] + 268]);
+  return { container, hint, widget };
 }
 
 app.registerExtension({
-    name: "zmocap.upload",
-    async setup() {
-        console.log("[zmocap] upload extension loaded");
-    },
-    async beforeRegisterNodeDef(nodeType, nodeData) {
-        if (!CHARACTER_NODES.has(nodeData.name)) {
-            return;
-        }
-        const original = nodeType.prototype.onNodeCreated;
-        nodeType.prototype.onNodeCreated = function () {
-            original?.apply(this, arguments);
-            addUploadButton(this);
-        };
-    },
-});
+  name: "zmocap.viewer",
 
-// --- 切换角色/蒙皮开关后自动重跑（上游有缓存，只有 Rig 与 Preview3D 真正执行）---
-// ComfyUI 改 widget 不会自动执行，而且输出名以前固定，导致“切了模式仍显示旧 GLB”。
-// 现在 Rig 的输出名带内容指纹，再配合这里的自动排队，切换即刷新。
-const AUTO_REFRESH_NODES = new Set(["ZMocapVRMLoader", "ZMocapRig"]);
-let pendingRun = null;
-
-function scheduleAutoRun(node) {
-    clearTimeout(pendingRun);
-    pendingRun = setTimeout(() => {
-        try {
-            console.log(`[zmocap] auto run after change on ${node?.type}`);
-            app.queuePrompt(0, 1);
-        } catch (error) {
-            console.error("[zmocap] auto run failed", error);
-        }
-    }, 700);
-}
-
-function hookAutoRun(node) {
-    if (node.__zmocapAutoRun) {
-        return;
+  async beforeRegisterNodeDef(nodeType, nodeData) {
+    const isCharacter = CHARACTER_NODES.has(nodeData.name);
+    const isRig = RIG_NODES.has(nodeData.name);
+    if (!isCharacter && !isRig) {
+      return;
     }
-    node.__zmocapAutoRun = true;
-    for (const widget of node.widgets || []) {
-        if (widget.type === "button" || widget.name === "filename") {
-            continue;
-        }
-        const original = widget.callback;
-        widget.callback = function (...args) {
+
+    const onCreated = nodeType.prototype.onNodeCreated;
+    nodeType.prototype.onNodeCreated = function () {
+      onCreated?.apply(this, arguments);
+      const node = this;
+      const container = document.createElement("div");
+      container.style.cssText =
+        "width:100%;height:260px;min-height:160px;border-radius:6px;overflow:hidden;position:relative;" +
+        "background:radial-gradient(circle at 50% 30%, #2a3340, #14181f 70%);";
+      const viewer = createViewer(container);
+      node.__zmocapViewer = viewer;
+      const { hint } = addPreviewWidget(node, viewer, container, isCharacter
+        ? "选择或上传 VRM 即预览"
+        : "运行后在此播放动作（skinned 开关即时切换显示层）");
+
+      if (isCharacter) {
+        const combo = node.widgets?.find((w) => w.name === "character");
+        if (combo) {
+          const original = combo.callback;
+          combo.callback = function (...args) {
             const result = original?.apply(this, args);
-            scheduleAutoRun(node);
+            loadCharacter(node, combo.value, hint);
             return result;
-        };
+          };
+          setTimeout(() => loadCharacter(node, combo.value, hint), 60);
+        }
+        addUploadButton(node, hint);
+      }
+
+      if (isRig) {
+        const skinned = node.widgets?.find((w) => w.name === "skinned");
+        const apply = () => viewer.setLayer(skinned?.value === false ? "bones" : "skinned");
+        if (skinned) {
+          const original = skinned.callback;
+          skinned.callback = function (...args) {
+            const result = original?.apply(this, args);
+            apply();
+            return result;
+          };
+        }
+        apply();
+        addPlayPauseButton(node, viewer);
+      }
+
+      const onRemoved = nodeType.prototype.onRemoved;
+      nodeType.prototype.onRemoved = function () {
+        viewer.dispose();
+        onRemoved?.apply(this, arguments);
+      };
+    };
+
+    if (isRig) {
+      const onExecuted = nodeType.prototype.onExecuted;
+      nodeType.prototype.onExecuted = function (message) {
+        onExecuted?.apply(this, arguments);
+        const name = message?.zmocap_glb?.[0];
+        if (!name) return;
+        const viewer = this.__zmocapViewer;
+        const skinned = this.widgets?.find((w) => w.name === "skinned");
+        viewer?.load(outputFileUrl(name)).then((info) => {
+          viewer.setLayer(skinned?.value === false ? "bones" : "skinned");
+          const hint = this.widgets?.find((w) => w.name === "zmocap_preview");
+          void hint;
+          console.log(`[zmocap] 预览已载入 ${name}（动画 ${info?.animations || 0} 条）`);
+        });
+      };
     }
+  },
+});
+
+function loadCharacter(node, value, hint) {
+  const viewer = node.__zmocapViewer;
+  if (!viewer) return;
+  if (!value || value === "none") {
+    viewer.reset();
+    if (hint) hint.textContent = "未选择 VRM（输出 none）";
+    return;
+  }
+  if (hint) hint.textContent = "载入中…";
+  viewer.load(inputFileUrl(value)).then((info) => {
+    if (hint) {
+      hint.textContent = info ? `已载入 ${value.split("/").pop()}` : `载入失败：${value}`;
+    }
+  });
 }
 
-app.registerExtension({
-    name: "zmocap.autorun",
-    async beforeRegisterNodeDef(nodeType, nodeData) {
-        if (!AUTO_REFRESH_NODES.has(nodeData.name)) {
-            return;
+function addUploadButton(node, hint) {
+  const button = node.addWidget("button", "上传 VRM 文件", null, async () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".vrm,.glb,.gltf";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const body = new FormData();
+      body.append("image", file, file.name);
+      body.append("type", "input");
+      body.append("subfolder", "zmocap");
+      body.append("overwrite", "true");
+      const response = await api.fetchApi("/upload/image", { method: "POST", body });
+      if (!response.ok) {
+        alert(`上传失败：${response.status} ${await response.text()}`);
+        return;
+      }
+      const data = await response.json();
+      const relative = data.subfolder ? `${data.subfolder}/${data.name}` : data.name;
+      const combo = node.widgets?.find((w) => w.name === "character");
+      if (combo) {
+        const options = combo.options?.values;
+        const list = Array.isArray(options) ? options : [...(options || [])];
+        if (!list.includes(relative)) {
+          list.push(relative);
+          if (combo.options) combo.options.values = list;
         }
-        const original = nodeType.prototype.onNodeCreated;
-        nodeType.prototype.onNodeCreated = function () {
-            original?.apply(this, arguments);
-            hookAutoRun(this);
-        };
-    },
-});
+        combo.value = relative;
+      }
+      node.setDirtyCanvas?.(true, true);
+      loadCharacter(node, relative, hint);
+    };
+    input.click();
+  });
+  button.serialize = false;
+}
+
+function addPlayPauseButton(node, viewer) {
+  let playing = true;
+  const button = node.addWidget("button", "播放 / 暂停", null, () => {
+    playing = !playing;
+    viewer.setPlaying(playing);
+    button.name = playing ? "暂停" : "播放";
+    node.setDirtyCanvas?.(true, true);
+  });
+  button.serialize = false;
+}

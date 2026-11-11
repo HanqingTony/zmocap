@@ -8,3 +8,6 @@ Vendored third-party components (added later) keep their original licenses:
 - KimodoMotionCorrection — see its upstream LICENSE
 - Sapiens2 / HaMeR — see their respective upstream licenses
 - SMPL-X body model — requires a license from Max Planck Institute
+
+第三方前端资源（web/js/vendor/）:
+- three.js r160、GLTFLoader、OrbitControls — MIT License, © 2010-2023 three.js authors

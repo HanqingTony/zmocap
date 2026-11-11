@@ -19,7 +19,6 @@ from .hands import ZMocapHaMeRHandFeatures
 from .keypoints import ZMocapSapiens2Keypoints
 from .loader import ZMocapModels
 from .video import ZMocapLoadVideo
-from .preview import ZMocapPreview3D
 from .probe import ZMocapEnvironment
 from .retarget import ZMocapRig
 from .track import ZMocapTrack
@@ -37,7 +36,6 @@ NODE_CLASS_MAPPINGS = {
     "ZMocapExMR": ZMocapExMR,
     "ZMocapRig": ZMocapRig,
     "ZMocapVRMLoader": ZMocapVRMLoader,
-    "ZMocapPreview3D": ZMocapPreview3D,
     "ZMocapExport": ZMocapExport,
 }
 
@@ -55,7 +53,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ZMocapExMR": "zmocap ExMR Solve",
     "ZMocapRig": "zmocap Rig (GLB)",
     "ZMocapVRMLoader": "zmocap VRM Loader",
-    "ZMocapPreview3D": "zmocap Skeleton Preview",
     "ZMocapExport": "zmocap Export NPZ/BVH",
 }
 

@@ -552,6 +552,75 @@ SMPLX_PARENTS = [-1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9, 12, 13, 14, 16, 1
                  37, 38, 21, 40, 41, 21, 43, 44, 21, 46, 47, 21, 49, 50, 21, 52, 53]
 
 
+def _add_bone_gizmos(appender: _Appender, joints: np.ndarray, fps: float,
+                     radius: float = 0.022) -> int:
+    """往现有 doc 里加一套“骨骼图层”（关节球 + 骨架线），带自带的平移动画。
+
+    节点都带 ``extras.zmocapBone = true``，前端据此在蒙皮/骨骼显示层之间切换——
+    这样切换纯属前端行为，不需要重跑任何节点。
+    """
+    import trimesh
+
+    doc = appender.doc
+    doc.setdefault("nodes", [])
+    doc.setdefault("meshes", [])
+    doc.setdefault("scenes", [{"nodes": []}])
+
+    sphere = trimesh.creation.icosphere(subdivisions=1, radius=radius)
+    positions = np.asarray(sphere.vertices, dtype=np.float32)
+    indices = np.asarray(sphere.faces, dtype=np.uint32).reshape(-1)
+    pos_accessor = appender.add_floats(positions, "VEC3", minmax=True)
+    index_view = appender.add_view(indices.tobytes())
+    doc["accessors"].append({"bufferView": index_view, "componentType": 5125,
+                             "count": int(indices.size), "type": "SCALAR"})
+    index_accessor = len(doc["accessors"]) - 1
+    doc["meshes"].append({"primitives": [{"attributes": {"POSITION": pos_accessor},
+                                          "indices": index_accessor, "mode": 4}]})
+    mesh_index = len(doc["meshes"]) - 1
+
+    count = joints.shape[0]
+    rest = np.asarray(joints[0], dtype=np.float64)
+    bone_ids: list[int] = []
+    for index in range(55):
+        parent = SMPLX_PARENTS[index]
+        offset = rest[index] - (rest[parent] if parent >= 0 else 0.0)
+        doc["nodes"].append({
+            "name": f"zmocap_bone_{index}",
+            "translation": [float(v) for v in offset],
+            "rotation": [0.0, 0.0, 0.0, 1.0],
+            "extras": {"zmocapBone": True},
+        })
+        bone_ids.append(len(doc["nodes"]) - 1)
+
+    for index in range(55):
+        doc["nodes"].append({"name": f"zmocap_bone_gizmo_{index}", "mesh": mesh_index,
+                             "extras": {"zmocapBone": True}})
+        doc["nodes"][bone_ids[index]].setdefault("children", []).append(len(doc["nodes"]) - 1)
+
+    for index in range(55):
+        parent = SMPLX_PARENTS[index]
+        if parent >= 0:
+            doc["nodes"][bone_ids[parent]].setdefault("children", []).append(bone_ids[index])
+
+    scene = doc["scenes"][0]
+    scene.setdefault("nodes", []).append(bone_ids[0])
+
+    times = (np.arange(count, dtype=np.float32) / float(fps))
+    time_accessor = appender.add_floats(times, "SCALAR", minmax=True)
+    samplers, channels = [], []
+    for index in range(55):
+        parent = SMPLX_PARENTS[index]
+        values = joints[:, index] - joints[:, parent] if parent >= 0 else joints[:, index]
+        accessor = appender.add_floats(np.asarray(values, dtype=np.float32), "VEC3")
+        samplers.append({"input": time_accessor, "output": accessor, "interpolation": "LINEAR"})
+        channels.append({"sampler": len(samplers) - 1,
+                         "target": {"node": bone_ids[index], "path": "translation"}})
+    doc.setdefault("animations", []).append(
+        {"name": "zmocap_bones", "samplers": samplers, "channels": channels}
+    )
+    return bone_ids[0]
+
+
 def _build_mannequin(appender: _Appender, joints: np.ndarray, quats: np.ndarray, fps: float) -> dict:
     """兜底骨架：真正的骨骼层级 + 每关节一个球。
 
@@ -624,7 +693,7 @@ def _build_mannequin(appender: _Appender, joints: np.ndarray, quats: np.ndarray,
 
 
 def build_glb(motion: dict, out_path: Path, character: str = "", mode: str = "auto",
-              strict: bool = False) -> tuple[Path, dict]:
+              strict: bool = False, bones: bool = True) -> tuple[Path, dict]:
     """把动作写成 GLB；返回 (路径, 统计信息)。"""
     import numpy as np
 
@@ -645,6 +714,9 @@ def build_glb(motion: dict, out_path: Path, character: str = "", mode: str = "au
             appender = _Appender(doc, binary)
             mapping = _bone_map(doc)
             if mapping and _add_animation(appender, doc, mapping, quats, fps, root_track=joints[:, 0]):
+                if bones:
+                    # 骨酪图层与角色共存于同一个 GLB：前端切显示层不用重跑工作流。
+                    _add_bone_gizmos(appender, joints, fps)
                 appender.finish()
                 info.update({"mode": "character", "bones": len(mapping)})
                 return _write_glb(Path(out_path), doc, appender.binary), info
@@ -665,7 +737,7 @@ def build_glb(motion: dict, out_path: Path, character: str = "", mode: str = "au
 
 
 class ZMocapRig:
-    """把动作绑到角色（或自带骨架）上，输出可被官方 `Preview3D` 播放的 GLB。"""
+    """把动作绑到角色（或自带骨架）上，输出带骨骼图层的 GLB，并在节点内直接预览。"""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -677,8 +749,8 @@ class ZMocapRig:
             "optional": {
                 # 角色完全由 `zmocap VRM Loader` 提供；不接就是自带骨架。
                 "character": ("ZMOCAP_CHARACTER",),
-                # True = 套角色（蒙皮），False = 自带骨架。骨骼名不匹配时直接报错，
-                # 不再静默回退（静默回退曾让人以为“角色没生效”）。
+                # 仅影响前端显示层：True = 蒙皮网格，False = 骨骼。切换即时生效，
+                # 不触发重跑（两套几何都在同一个 GLB 里）。
                 "skinned": ("BOOLEAN", {"default": True}),
             },
         }
@@ -700,22 +772,28 @@ class ZMocapRig:
             target = str(character or "").strip()
         if target.startswith("("):
             target = ""
-        mode = "auto" if bool(skinned) and target else "mannequin"
+        # 有角色就一律按角色绑（`skinned` 只是前端的显示层开关，不再影响绑定内容），
+        # 否则输出自带骨架。
+        mode = "auto" if target else "mannequin"
         # 输出名带内容指纹：改了角色/模式/动作就换 URL，前端 three.js 必然重新加载，
         # 否则同一个文件名会被浏览器缓存，切换看起来“没生效”。
         params = motion.get("params") or {}
         seed = "|".join([
             str(motion.get("source")), str(int(np.asarray(motion["joints"]).shape[0])),
-            f"{float(motion.get('fps', 30.0)):.3f}", target, str(bool(skinned)),
+            f"{float(motion.get('fps', 30.0)):.3f}", target,
             f"{float(np.abs(np.asarray(motion['joints'])).sum()):.4f}",
             str(int(np.asarray(params.get('betas')).sum() * 1000)) if 'betas' in params else "",
         ])
         digest = hashlib.sha1(seed.encode()).hexdigest()[:8]
         outdir = Path(folder_paths.get_output_directory())
         path, info = build_glb(motion, outdir / f"{filename}_{digest}.glb",
-                               character=target, mode=mode, strict=bool(skinned and target))
+                               character=target, mode=mode, strict=bool(target), bones=True)
         print(f"[zmocap] rig {info['mode']} -> {path} ({info['bones']} bones, {info['frames']} frames)")
         # Preview3D 只认 output 目录下的相对文件名（前端用 /view?filename=... 加载），
         # 绝对路径会 404 变成空白预览，所以返回值给相对路径，绝对路径放在 ui 里。
         relative = path.relative_to(Path(folder_paths.get_output_directory())).as_posix()
-        return {"ui": {"zmocap_rig": [{"path": str(path), **info}]}, "result": (relative,)}
+        return {
+            # zmocap_glb 给节点内置的 three.js 预览用（相对 output 的路径 + 指纹，避免缓存）
+            "ui": {"zmocap_glb": [relative], "zmocap_rig": [{"path": str(path), **info}]},
+            "result": (relative,),
+        }

@@ -4,7 +4,7 @@
 
     LoadVideo → GetVideoComponents → ZMocapTrack / ZMocapFrames / ZMocapModels
       → ZMocapSapiens2Keypoints / ZMocapSam3DBodyFeatures / ZMocapHaMeRHandFeatures
-      → ZMocapExMR ─┬→ ZMocapRig ← ZMocapVRMLoader → Preview3D（角色 + 动作）
+      → ZMocapExMR → ZMocapRig ← ZMocapVRMLoader（两者都在节点内预览）
                     └→ ZMocapExport
 
 角色加载（ZMocapVRMLoader）与动作绑定（ZMocapRig）完全解耦。
@@ -113,13 +113,6 @@ def build(video: str = "zmocap_test.mp4", character: str = "(none / built-in ske
     b.link(exmr, 0, rig, 0, "ZMOCAP_MOTION")
     b.link(loader, 0, rig, 1, "ZMOCAP_CHARACTER")
 
-    viewer_rig = b.node("Preview3D", (2660, 80), (420, 460), [""],
-                        inputs=[("model_file", "STRING")], title="Preview3D (character + motion)")
-    b.link(rig, 0, viewer_rig, 0, "STRING")
-
-    viewer_char = b.node("Preview3D", (2280, 380), (330, 300), [""],
-                         inputs=[("model_file", "STRING")], title="Preview3D (character only)")
-    b.link(loader, 1, viewer_char, 0, "STRING")
 
     export = b.node("ZMocapExport", (2280, 720), (330, 130), ["zmocap_motion", True],
                     inputs=[("motion", "ZMOCAP_MOTION")], outputs=[("saved_path", "STRING")])
