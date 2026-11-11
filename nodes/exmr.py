@@ -1,25 +1,29 @@
-"""ExMR 骨骼节点：帧批 → SMPL-X 参数与世界坐标关节。"""
+"""ExMR 解算节点：关键点 + body/hand 特征 → SMPL-X 参数与世界坐标关节。
+
+三个前置阶段各自是独立节点（`ZMocapSapiens2Keypoints` / `ZMocapSam3DBodyFeatures`
+/ `ZMocapHaMeRHandFeatures`），这里只做解算 + 前向出关节，便于在 ComfyUI 里
+单独缓存、单独观察每一步。
+"""
 
 from __future__ import annotations
 
-import shutil
-import tempfile
 from pathlib import Path
 
 import numpy as np
 
 from .exmr_engine import ExMRRunner, build_assets
-from .frames import images_to_dir
 
 
 class ZMocapExMR:
-    """用 Sapiens2 关键点 + SAM 3D Body/HaMeR 特征，跑 ExMR 得到 SMPL-X 动作。"""
+    """用预计算的关键点与特征跑 ExMR，输出 SMPL-X 动作与 127 个关节。"""
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "images": ("IMAGE",),
+                "keypoints": ("ZMOCAP_KEYPOINTS",),
+                "body_features": ("ZMOCAP_BODY_FEATURES",),
+                "hand_features": ("ZMOCAP_HAND_FEATURES",),
                 "tracks": ("ZMOCAP_TRACKS",),
                 "models": ("ZMOCAP_MODELS",),
             },
@@ -27,7 +31,6 @@ class ZMocapExMR:
                 "fps": ("FLOAT", {"default": 30.0, "min": 1.0, "max": 120.0, "step": 0.5}),
                 "static_camera": ("BOOLEAN", {"default": True}),
                 "smooth_global": ("BOOLEAN", {"default": True}),
-                "keep_frames": ("BOOLEAN", {"default": False}),
             },
         }
 
@@ -36,62 +39,77 @@ class ZMocapExMR:
     FUNCTION = "run"
     CATEGORY = "zmocap"
 
-    def run(self, images, tracks, models, fps=30.0, static_camera=True, smooth_global=True, keep_frames=False):
-        import torch
-        from exmr import pipeline as P
+    def run(self, keypoints, body_features, hand_features, tracks, models,
+            fps=30.0, static_camera=True, smooth_global=True):
+        with_hands = hand_features is not None
+        if not with_hands:
+            print("[zmocap] 未接入手部特征：手部姿态将保持中性")
 
         assets = build_assets(Path(models["root"]), Path(models["vendor"]))
-        low_memory = bool(models.get("low_memory", True))
+        count = int(keypoints["count"])
+        boxes = np.asarray(tracks["boxes"], dtype=np.float32)[:count]
+        intrinsics = np.asarray(tracks["K"], dtype=np.float32)[:count]
 
-        workdir = Path(tempfile.mkdtemp(prefix="zmocap-frames-"))
-        try:
-            frames_dir, count, _ = images_to_dir(images, workdir)
-            boxes = np.asarray(tracks["boxes"], dtype=np.float32)[:count]
-            intrinsics = np.asarray(tracks["K"], dtype=np.float32)[:count]
-            if boxes.shape[0] != count:
-                raise ValueError(f"跟踪帧数 {boxes.shape[0]} 与视频帧数 {count} 不一致")
-
-            runner = ExMRRunner(assets)
-            keypoints = runner.keypoints(frames_dir, boxes, low_memory=low_memory)
-            body, hands = runner.features(
-                frames_dir, boxes, intrinsics, keypoints=keypoints, low_memory=low_memory
-            )
-            data = runner.model_inputs(keypoints, boxes, intrinsics, body=body, hands=hands)
-            native = runner.infer(
-                data, static_cam=static_camera, fps=float(fps), smooth_global=smooth_global
-            )
-            params = {k: v.detach().cpu() if hasattr(v, "detach") else torch.as_tensor(v) for k, v in native["smplx_global"].items()}
-            joints = _joints(params, assets / "body_models/smplx/SMPLX_NEUTRAL.npz")
-            motion = {
-                "params": params,
-                "joints": joints,
-                "fps": float(fps),
-                "frames": int(count),
-                "static_conf_logits": native.get("static_conf_logits"),
-                "source": "exmr/sapiens2",
-            }
-            _release()
-            return (motion,)
-        finally:
-            if not keep_frames:
-                shutil.rmtree(workdir, ignore_errors=True)
+        runner = ExMRRunner(assets)
+        data = runner.model_inputs(
+            np.asarray(keypoints["xy"], dtype=np.float32),
+            boxes,
+            intrinsics,
+            body=np.asarray(body_features["values"], dtype=np.float32),
+            hands=np.asarray(hand_features["values"], dtype=np.float32) if with_hands else None,
+        )
+        native = runner.infer(
+            data, static_cam=static_camera, fps=float(fps), smooth_global=smooth_global
+        )
+        params = {
+            key: (value.detach().cpu() if hasattr(value, "detach") else value)
+            for key, value in native["smplx_global"].items()
+        }
+        joints = _joints(params, assets / "body_models/smplx/SMPLX_NEUTRAL.npz")
+        motion = {
+            "params": params,
+            "joints": joints,
+            "fps": float(fps),
+            "frames": int(count),
+            "static_conf_logits": native.get("static_conf_logits"),
+            "source": "exmr/sapiens2",
+            "has_hands": bool(with_hands),
+        }
+        _release()
+        return (motion,)
 
 
 def _joints(params, body_path) -> np.ndarray:
-    """SMPL-X 前向得到世界坐标关节 (T, J, 3)。"""
+    """SMPL-X 前向得到世界坐标关节 (T, 127, 3)，含手指。
+
+    面部的 jaw/leye/reye 必须显式给成 batch 形状：smplx 内部把它们和
+    global_orient/body_pose 一起 `torch.cat(dim=1)`，若留默认值（1x3）就会
+    在 155 帧时报 "Expected size 155 but got size 1 for tensor number 2"。
+    """
     import torch
     import smplx
 
     body = smplx.SMPLX(str(body_path), flat_hand_mean=False, use_pca=False).eval()
     count = int(params["betas"].shape[0])
+
+    def get(name, width, default=0.0):
+        value = params.get(name)
+        if value is None:
+            return torch.full((count, width), default)
+        return value.clone().reshape(count, width)
+
     with torch.inference_mode():
         output = body(
-            betas=params["betas"].clone(),
-            global_orient=params["global_orient"].clone(),
-            body_pose=params["body_pose"].clone(),
-            left_hand_pose=params.get("left_hand_pose", torch.zeros(count, 45)),
-            right_hand_pose=params.get("right_hand_pose", torch.zeros(count, 45)),
-            transl=params["transl"].clone(),
+            betas=get("betas", 10),
+            global_orient=get("global_orient", 3),
+            body_pose=get("body_pose", 63),
+            left_hand_pose=get("left_hand_pose", 45),
+            right_hand_pose=get("right_hand_pose", 45),
+            expression=get("expression", 10),
+            jaw_pose=get("jaw_pose", 3),
+            leye_pose=get("leye_pose", 3),
+            reye_pose=get("reye_pose", 3),
+            transl=get("transl", 3),
         )
     return output.joints.detach().cpu().numpy()
 
@@ -106,7 +124,3 @@ def _release():
         mm.soft_empty_cache()
     except Exception:
         pass
-
-
-import torch as _torch  # noqa: E402  (供 _joints 内默认张量使用)
-_ = _torch

@@ -37,6 +37,10 @@ class ZMocapTrack:
     CATEGORY = "zmocap"
 
     def run(self, images, weights, confidence, fov_deg, person):
+        try:
+            _prepare_gpu()
+        except Exception as exc:
+            print(f"[zmocap] 显存准备失败：{exc}")
         from ultralytics import YOLO
 
         frames = images.detach().cpu().numpy() if hasattr(images, "detach") else np.asarray(images)
@@ -70,6 +74,8 @@ class ZMocapTrack:
             raise ValueError("选定人物没有有效帧")
         _fill_gaps(boxes_out, observed)
         intrinsics = default_intrinsics(width, height, fov_deg)
+        del model
+        _release_models()
         return (
             {
                 "boxes": boxes_out,
@@ -135,3 +141,22 @@ def _fill_gaps(boxes, observed):
         if not observed[index]:
             nearest = indices[int(np.argmin(np.abs(indices - index)))]
             boxes[index] = boxes[nearest]
+
+
+def _prepare_gpu():
+    """检测模型很小，但要先让 ComfyUI 把显存里的其它模型放掉。"""
+    import comfy.model_management as mm
+
+    mm.free_memory(int(1.5 * 1024 ** 3), mm.get_torch_device())
+
+
+def _release_models():
+    import gc
+
+    gc.collect()
+    try:
+        import comfy.model_management as mm
+
+        mm.soft_empty_cache()
+    except Exception:
+        pass

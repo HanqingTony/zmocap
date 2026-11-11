@@ -5,10 +5,11 @@ from pathlib import Path
 import numpy as np
 
 
-def images_to_dir(images, directory, prefix="frame", ext="png"):
+def images_to_dir(images, directory, prefix="", ext="jpg", quality=95):
     """把 ComfyUI 的 IMAGE 批张量写成 ExMR 期望的帧目录。
 
     images: (B, H, W, C) float [0, 1] 的 torch 张量（ComfyUI 约定）
+    默认写成 000000.jpg 形式：vendored ExMR 预处理按 "%06d.jpg" 读帧。
     返回: 帧目录路径、帧数、画布尺寸 (W, H)
     """
     from PIL import Image
@@ -21,7 +22,7 @@ def images_to_dir(images, directory, prefix="frame", ext="png"):
     array = np.clip(array, 0.0, 1.0)
     array = (array * 255.0 + 0.5).astype(np.uint8)
     for index, frame in enumerate(array):
-        Image.fromarray(frame).save(directory / f"{prefix}{index:06d}.{ext}")
+        Image.fromarray(frame).save(directory / f"{prefix}{index:06d}.{ext}", quality=quality)
     height, width = array.shape[1], array.shape[2]
     return directory, array.shape[0], (width, height)
 

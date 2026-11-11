@@ -11,6 +11,8 @@ import shutil
 import sys
 from pathlib import Path
 
+import numpy as np
+
 # 模型根目录下的相对路径（用户把权重放在 ComfyUI/models/zmocap/）
 SOURCES = {
     "exmr": "exmr/exmr.safetensors",
@@ -191,11 +193,12 @@ class ExMRRunner:
             del model
             _flush()
 
-    def features(self, frames: Path, boxes, intrinsics, keypoints=None, low_memory=True, hands=True):
+    def body_features(self, frames: Path, boxes, intrinsics, low_memory=True):
+        """SAM 3D Body 的 body decoder pose token，每帧一个 (L, 1024)。"""
         import torch
         from exmr.preprocessing.body_features import SamBodyFeatures
 
-        body = SamBodyFeatures(
+        model = SamBodyFeatures(
             str(self.assets / "sam-3d-body-dinov3"),
             batch_size=8,
             num_workers=0,
@@ -205,32 +208,41 @@ class ExMRRunner:
             with torch.inference_mode():
                 count = int(torch.as_tensor(boxes).shape[0])
                 aligned = frame_intrinsics(intrinsics, count)
-                body_features = body(
+                return model(
                     str(frames),
                     torch.as_tensor(boxes, dtype=torch.float32),
                     torch.as_tensor(aligned),
                 )
         finally:
-            del body
+            del model
             _flush()
-        if not hands:
-            return body_features, None
+
+    def hands(self, frames: Path, boxes, intrinsics, keypoints=None, low_memory=True, backend="sapiens2"):
+        """HaMeR 手部 token（每帧左右手各一个特征）。"""
+        import torch
         from exmr import pipeline as P
         from exmr.preprocessing.hand_features import HamerHandFeatures
 
         if keypoints is None:
             keypoints = self.keypoints(frames, boxes, low_memory=low_memory)
-        hand_boxes = P.hand_boxes(keypoints, "sapiens2")
-        hamer = HamerHandFeatures(
+        hand_boxes = P.hand_boxes(torch.as_tensor(np.asarray(keypoints)), backend)
+        model = HamerHandFeatures(
             str(self.assets / "hamer"), batch_size=8, num_workers=0, low_memory=low_memory
         )
         try:
             with torch.inference_mode():
-                hand_features = hamer(str(frames), hand_boxes)
+                return model(str(frames), hand_boxes)
         finally:
-            del hamer
+            del model
             _flush()
-        return body_features, hand_features
+
+    def features(self, frames: Path, boxes, intrinsics, keypoints=None, low_memory=True, hands=True):
+        body_features = self.body_features(frames, boxes, intrinsics, low_memory=low_memory)
+        if not hands:
+            return body_features, None
+        return body_features, self.hands(
+            frames, boxes, intrinsics, keypoints=keypoints, low_memory=low_memory
+        )
 
     def infer(self, data, static_cam=True, fps=30.0, smooth_global=True):
         import torch
@@ -243,7 +255,11 @@ class ExMRRunner:
         try:
             with torch.inference_mode():
                 output = model(
-                    **{key: value[None].cuda() for key, value in data.items()},
+                    **{
+                        key: torch.as_tensor(np.asarray(value, dtype=np.float32))[None].cuda()
+                        for key, value in data.items()
+                        if value is not None
+                    },
                     static_cam=static_cam,
                     snap_to_ground=False,
                     smooth_incam=False,

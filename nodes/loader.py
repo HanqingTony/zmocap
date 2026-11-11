@@ -7,13 +7,33 @@ from .exmr_engine import SOURCES
 REPO = Path(__file__).resolve().parent.parent
 
 
-def models_root() -> Path:
+# 权重齐全的判定标志（ExMR 主模型）
+MARKER = "exmr/exmr.safetensors"
+
+
+def candidate_roots():
+    """候选模型根目录：ComfyUI 自己的 models、extra 路径、家目录备份。"""
+    roots = []
     try:
         import folder_paths
 
-        return Path(folder_paths.models_dir) / "zmocap"
-    except Exception:  # 独立运行时退化到家目录
-        return Path.home() / "zext/comfyui/models/zmocap"
+        roots.append(Path(folder_paths.models_dir) / "zmocap")
+        base = getattr(folder_paths, "base_path", None)
+        if base:
+            roots.append(Path(base) / "models" / "zmocap")
+    except Exception:
+        pass
+    roots.append(Path.home() / "zext/comfyui/models/zmocap")
+    return roots
+
+
+def models_root() -> Path:
+    """挑第一个真正有 ExMR 权重的目录（都不全就返回首选目录）。"""
+    roots = candidate_roots()
+    for root in roots:
+        if (root / MARKER).is_file():
+            return root
+    return roots[0]
 
 
 class ZMocapModels:
