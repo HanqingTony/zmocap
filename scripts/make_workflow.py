@@ -81,6 +81,7 @@ def build(video: str = "zmocap_test.mp4", character: str = "(none / built-in ske
         return node
 
     keypoints = stage("ZMocapSapiens2Keypoints", (1130, 80),
+                      extra_widgets=[True, "448x336"],
                       outputs=[("keypoints", "ZMOCAP_KEYPOINTS")])
     body = stage("ZMocapSam3DBodyFeatures", (1130, 260),
                  outputs=[("body_features", "ZMOCAP_BODY_FEATURES")])
@@ -89,7 +90,7 @@ def build(video: str = "zmocap_test.mp4", character: str = "(none / built-in ske
                   outputs=[("hand_features", "ZMOCAP_HAND_FEATURES")])
     b.link(keypoints, 0, hands, 3, "ZMOCAP_KEYPOINTS")
 
-    exmr = b.node("ZMocapExMR", (1510, 80), (330, 240), [24.0, True, True],
+    exmr = b.node("ZMocapExMR", (1510, 80), (330, 260), [30.0, True, True, False, False],
                   inputs=[("keypoints", "ZMOCAP_KEYPOINTS"), ("body_features", "ZMOCAP_BODY_FEATURES"),
                           ("hand_features", "ZMOCAP_HAND_FEATURES"), ("tracks", "ZMOCAP_TRACKS"),
                           ("models", "ZMOCAP_MODELS"), ("fps", "FLOAT")],
@@ -106,7 +107,7 @@ def build(video: str = "zmocap_test.mp4", character: str = "(none / built-in ske
                     outputs=[("character", "ZMOCAP_CHARACTER"), ("glb_path", "STRING")])
 
     # 绑定：motion + 角色 → GLB（唯一消费者关系：Rig 吃 motion，吃角色）
-    rig = b.node("ZMocapRig", (2280, 80), (330, 120), ["zmocap_rig", "auto"],
+    rig = b.node("ZMocapRig", (2280, 80), (330, 120), ["zmocap_rig", True],
                  inputs=[("motion", "ZMOCAP_MOTION"), ("character", "ZMOCAP_CHARACTER")],
                  outputs=[("glb_path", "STRING")])
     b.link(exmr, 0, rig, 0, "ZMOCAP_MOTION")

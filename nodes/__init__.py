@@ -18,6 +18,7 @@ from .frames_node import ZMocapFrames, ZMocapIntrinsics
 from .hands import ZMocapHaMeRHandFeatures
 from .keypoints import ZMocapSapiens2Keypoints
 from .loader import ZMocapModels
+from .video import ZMocapLoadVideo
 from .preview import ZMocapPreview3D
 from .probe import ZMocapEnvironment
 from .retarget import ZMocapRig
@@ -25,6 +26,7 @@ from .track import ZMocapTrack
 
 NODE_CLASS_MAPPINGS = {
     "ZMocapEnvironment": ZMocapEnvironment,
+    "ZMocapLoadVideo": ZMocapLoadVideo,
     "ZMocapModels": ZMocapModels,
     "ZMocapTrack": ZMocapTrack,
     "ZMocapFrames": ZMocapFrames,
@@ -42,6 +44,7 @@ NODE_CLASS_MAPPINGS = {
 # 仅 ASCII，不带序号
 NODE_DISPLAY_NAME_MAPPINGS = {
     "ZMocapEnvironment": "zmocap Environment",
+    "ZMocapLoadVideo": "zmocap Load Video",
     "ZMocapModels": "zmocap Models",
     "ZMocapTrack": "zmocap Track",
     "ZMocapFrames": "zmocap Frames",

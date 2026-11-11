@@ -81,3 +81,53 @@ app.registerExtension({
         };
     },
 });
+
+// --- 切换角色/蒙皮开关后自动重跑（上游有缓存，只有 Rig 与 Preview3D 真正执行）---
+// ComfyUI 改 widget 不会自动执行，而且输出名以前固定，导致“切了模式仍显示旧 GLB”。
+// 现在 Rig 的输出名带内容指纹，再配合这里的自动排队，切换即刷新。
+const AUTO_REFRESH_NODES = new Set(["ZMocapVRMLoader", "ZMocapRig"]);
+let pendingRun = null;
+
+function scheduleAutoRun(node) {
+    clearTimeout(pendingRun);
+    pendingRun = setTimeout(() => {
+        try {
+            console.log(`[zmocap] auto run after change on ${node?.type}`);
+            app.queuePrompt(0, 1);
+        } catch (error) {
+            console.error("[zmocap] auto run failed", error);
+        }
+    }, 700);
+}
+
+function hookAutoRun(node) {
+    if (node.__zmocapAutoRun) {
+        return;
+    }
+    node.__zmocapAutoRun = true;
+    for (const widget of node.widgets || []) {
+        if (widget.type === "button" || widget.name === "filename") {
+            continue;
+        }
+        const original = widget.callback;
+        widget.callback = function (...args) {
+            const result = original?.apply(this, args);
+            scheduleAutoRun(node);
+            return result;
+        };
+    }
+}
+
+app.registerExtension({
+    name: "zmocap.autorun",
+    async beforeRegisterNodeDef(nodeType, nodeData) {
+        if (!AUTO_REFRESH_NODES.has(nodeData.name)) {
+            return;
+        }
+        const original = nodeType.prototype.onNodeCreated;
+        nodeType.prototype.onNodeCreated = function () {
+            original?.apply(this, arguments);
+            hookAutoRun(this);
+        };
+    },
+});

@@ -8,6 +8,8 @@ import numpy as np
 class ZMocapExport:
     """把动作序列写成 NPZ（关节 + SMPL-X 参数）和 BVH（骨架动画）。"""
 
+    OUTPUT_NODE = True
+
     @classmethod
     def INPUT_TYPES(cls):
         return {

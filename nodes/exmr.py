@@ -31,6 +31,8 @@ class ZMocapExMR:
                 "fps": ("FLOAT", {"default": 30.0, "min": 1.0, "max": 120.0, "step": 0.5}),
                 "static_camera": ("BOOLEAN", {"default": True}),
                 "smooth_global": ("BOOLEAN", {"default": True}),
+                "snap_to_ground": ("BOOLEAN", {"default": False}),
+                "normalize_world": ("BOOLEAN", {"default": False}),
             },
         }
 
@@ -40,7 +42,8 @@ class ZMocapExMR:
     CATEGORY = "zmocap"
 
     def run(self, keypoints, body_features, hand_features, tracks, models,
-            fps=30.0, static_camera=True, smooth_global=True):
+            fps=30.0, static_camera=True, smooth_global=True,
+            snap_to_ground=False, normalize_world=False):
         with_hands = hand_features is not None
         if not with_hands:
             print("[zmocap] 未接入手部特征：手部姿态将保持中性")
@@ -59,7 +62,8 @@ class ZMocapExMR:
             hands=np.asarray(hand_features["values"], dtype=np.float32) if with_hands else None,
         )
         native = runner.infer(
-            data, static_cam=static_camera, fps=float(fps), smooth_global=smooth_global
+            data, static_cam=static_camera, fps=float(fps), smooth_global=smooth_global,
+            snap_to_ground=bool(snap_to_ground), normalize_world=bool(normalize_world),
         )
         params = {
             key: (value.detach().cpu() if hasattr(value, "detach") else value)

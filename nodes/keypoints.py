@@ -23,7 +23,10 @@ class ZMocapSapiens2Keypoints:
                 "tracks": ("ZMOCAP_TRACKS",),
                 "models": ("ZMOCAP_MODELS",),
             },
-            "optional": {"low_memory": ("BOOLEAN", {"default": True})},
+            "optional": {
+                "low_memory": ("BOOLEAN", {"default": True}),
+                "resolution": (["448x336", "512x384", "1024x768"], {"default": "448x336"}),
+            },
         }
 
     RETURN_TYPES = ("ZMOCAP_KEYPOINTS",)
@@ -31,13 +34,14 @@ class ZMocapSapiens2Keypoints:
     FUNCTION = "run"
     CATEGORY = "zmocap"
 
-    def run(self, frames, tracks, models, low_memory=True):
+    def run(self, frames, tracks, models, low_memory=True, resolution="448x336"):
         _reserve(1.6)
         assets = build_assets(Path(models["root"]), Path(models["vendor"]))
         count = int(frames["count"])
         boxes = np.asarray(tracks["boxes"], dtype=np.float32)[:count]
         runner = ExMRRunner(assets)
-        keypoints = runner.keypoints(Path(frames["dir"]), boxes, low_memory=bool(low_memory))
+        keypoints = runner.keypoints(Path(frames["dir"]), boxes, low_memory=bool(low_memory),
+                                    resolution=str(resolution))
         array = np.asarray(keypoints.detach().cpu() if hasattr(keypoints, "detach") else keypoints)
         print(f"[zmocap] sapiens2 keypoints {array.shape}")
         return ({"xy": array.astype(np.float32), "count": count,

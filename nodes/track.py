@@ -7,6 +7,8 @@ import numpy as np
 from .frames import default_intrinsics
 from .loader import models_root
 
+import torch
+
 
 def _yolo_weights(name: str) -> Path:
     root = models_root()
@@ -48,17 +50,22 @@ class ZMocapTrack:
             frames = frames[None]
         height, width = frames.shape[1], frames.shape[2]
         model = YOLO(str(_yolo_weights(weights)))
-        results = model.predict(
-            [np.clip(frame, 0, 1)[..., ::-1] * 255 for frame in frames],
-            conf=confidence,
-            classes=[0],
-            verbose=False,
-        )
+        # 分块推理：Ultralytics 会把整批图像同时搬到显存，长视频一次性传入会 OOM。
         detections = []
-        for result in results:
-            boxes = result.boxes.xyxy.cpu().numpy() if result.boxes is not None else np.zeros((0, 4))
-            detections.append(boxes)
-
+        for start in range(0, len(frames), 8):
+            chunk = frames[start:start + 8]
+            with torch.inference_mode():
+                results = model.predict(
+                    [np.clip(frame, 0, 1)[..., ::-1] * 255 for frame in chunk],
+                    conf=confidence,
+                    classes=[0],
+                    verbose=False,
+                )
+            for result in results:
+                boxes = result.boxes.xyxy.cpu().numpy() if result.boxes is not None else np.zeros((0, 4))
+                detections.append(boxes)
+            del results
+            torch.cuda.empty_cache()
         tracks = _associate([self._largest(boxes) for boxes in detections])
         ids = sorted({tid for tid in tracks if tid is not None}, key=lambda tid: -sum(1 for t in tracks if t == tid))
         if not ids:

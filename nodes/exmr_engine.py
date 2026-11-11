@@ -176,13 +176,13 @@ class ExMRRunner:
         )
 
     # --- 三个阶段 ---------------------------------------------------------
-    def keypoints(self, frames: Path, boxes, low_memory=True):
+    def keypoints(self, frames: Path, boxes, low_memory=True, resolution="448x336"):
         import torch
         from exmr.preprocessing.keypoints.sapiens2 import Sapiens2Keypoints
 
         model = Sapiens2Keypoints(
             str(self.assets / "sapiens2/sapiens2_1b_pose.safetensors"),
-            resolution="448x336",
+            resolution=resolution,
             num_workers=0,
             low_memory=low_memory,
         )
@@ -244,7 +244,8 @@ class ExMRRunner:
             frames, boxes, intrinsics, keypoints=keypoints, low_memory=low_memory
         )
 
-    def infer(self, data, static_cam=True, fps=30.0, smooth_global=True):
+    def infer(self, data, static_cam=True, fps=30.0, smooth_global=True,
+              snap_to_ground=False, normalize_world=False, smooth_incam=False):
         import torch
         from exmr.model.exmr import ExMR
 
@@ -261,11 +262,11 @@ class ExMRRunner:
                         if value is not None
                     },
                     static_cam=static_cam,
-                    snap_to_ground=False,
-                    smooth_incam=False,
+                    snap_to_ground=snap_to_ground,
+                    smooth_incam=smooth_incam,
                     smooth_global=smooth_global,
                     fps=fps,
-                    normalize_world=False,
+                    normalize_world=normalize_world,
                 )
                 native = {
                     space: {key: value[0].cpu() for key, value in output[space].items()}

@@ -39,27 +39,77 @@ SMPLX_NAMES = [
     "right_ring2", "right_ring3", "right_thumb1", "right_thumb2", "right_thumb3",
 ]
 
-# 目标骨架候选名：Mixamo（FBX/GLB 常见）与 VRM humanoid
-_ALIASES = {
-    "pelvis": ["hips", "mixamorighips", "pelvis", "j_bip_c_hips"],
-    "spine1": ["spine", "mixamorigspine", "spine1", "j_bip_c_spine"],
-    "spine2": ["spine1", "mixamorigspine1", "spine2", "j_bip_c_chest"],
-    "spine3": ["spine2", "mixamorigspine2", "spine3", "j_bip_c_upperchest"],
-    "neck": ["neck", "mixamorigneck", "j_bip_c_neck"],
-    "head": ["head", "mixamorighead", "j_bip_c_head"],
-    "left_shoulder": ["leftshoulder", "mixamorigleftshoulder", "left_shoulder", "j_bip_l_shoulder"],
-    "right_shoulder": ["rightshoulder", "mixamorigrightshoulder", "right_shoulder", "j_bip_r_shoulder"],
-    "left_elbow": ["leftarm", "mixamorigleftarm", "left_elbow", "j_bip_l_lowerarm"],
-    "right_elbow": ["rightarm", "mixamorigrightarm", "right_elbow", "j_bip_r_lowerarm"],
-    "left_wrist": ["lefthand", "mixamoriglefthand", "left_wrist", "j_bip_l_hand"],
-    "right_wrist": ["righthand", "mixamorigrighthand", "right_wrist", "j_bip_r_hand"],
-    "left_hip": ["leftupleg", "mixamorigleftupleg", "left_hip", "j_bip_l_upperleg"],
-    "right_hip": ["rightupleg", "mixamorigrightupleg", "right_hip", "j_bip_r_upperleg"],
-    "left_knee": ["leftleg", "mixamorigleftleg", "left_knee", "j_bip_l_lowerleg"],
-    "right_knee": ["rightleg", "mixamorigrightleg", "right_knee", "j_bip_r_lowerleg"],
-    "left_ankle": ["leftfoot", "mixamorigleftfoot", "left_ankle", "j_bip_l_foot"],
-    "right_ankle": ["rightfoot", "mixamorigrightfoot", "right_ankle", "j_bip_r_foot"],
-}
+# 目标骨骼名 → SMPL-X 关节索引。
+#
+# 关键：SMPL-X 的旋转是“关节坐标系的增量”，它驱动的是 *父关节→本关节这一段骨骼*；
+# 而 VRM/Mixamo 的骨骼节点旋转驱动的是 *自身节点→子骨* 的骨段。因此映射必须
+# 错开一级：角色的 UpperArm（肩膀→手肘段）对应 SMPL-X 的 left_shoulder(16)，
+# 而不是 left_elbow(18)；UpperLeg 对应 left_hip(1) 而不是 left_knee(4)。
+# 按序号顺移一格是这里最容易错的地方。
+_BONE_TABLE: list[tuple[int, tuple[str, ...]]] = [
+    (0, ("hips", "mixamorighips", "j_bip_c_hips", "pelvis")),
+    (3, ("spine", "mixamorigspine", "j_bip_c_spine")),
+    (6, ("chest", "spine1", "mixamorigspine1", "j_bip_c_chest")),
+    (9, ("upperchest", "spine2", "mixamorigspine2", "j_bip_c_upperchest")),
+    (12, ("neck", "mixamorigneck", "j_bip_c_neck")),
+    (15, ("head", "mixamorighead", "j_bip_c_head")),
+    # 左臂：collar → shoulder 段 / shoulder → elbow 段 / elbow → wrist 段 / 手
+    (13, ("leftshoulder", "mixamorigleftshoulder", "j_bip_l_shoulder", "leftcollar")),
+    (16, ("leftarm", "mixamorigleftarm", "j_bip_l_upperarm", "leftupperarm")),
+    (18, ("leftforearm", "mixamorigleftforearm", "j_bip_l_lowerarm", "leftlowerarm")),
+    (20, ("lefthand", "mixamoriglefthand", "j_bip_l_hand", "lefthandjnt")),
+    # 右臂
+    (14, ("rightshoulder", "mixamorigrightshoulder", "j_bip_r_shoulder", "rightcollar")),
+    (17, ("rightarm", "mixamorigrightarm", "j_bip_r_upperarm", "rightupperarm")),
+    (19, ("rightforearm", "mixamorigrightforearm", "j_bip_r_lowerarm", "rightlowerarm")),
+    (21, ("righthand", "mixamorigrighthand", "j_bip_r_hand", "righthandjnt")),
+    # 左腿：hip → knee 段 / knee → ankle 段 / ankle → toe 段 / 脚趾
+    (1, ("leftupleg", "mixamorigleftupleg", "j_bip_l_upperleg", "leftupperleg", "lefthip")),
+    (4, ("leftleg", "mixamorigleftleg", "j_bip_l_lowerleg", "leftlowerleg", "leftknee")),
+    (7, ("leftfoot", "mixamorigleftfoot", "j_bip_l_foot", "leftankle")),
+    (10, ("j_bip_l_toebase", "lefttoebase", "mixamoriglefttoebase", "j_bip_l_toes", "lefttoe")),
+    (2, ("rightupleg", "mixamorigrightupleg", "j_bip_r_upperleg", "rightupperleg", "righthip")),
+    (5, ("rightleg", "mixamorigrightleg", "j_bip_r_lowerleg", "rightlowerleg", "rightknee")),
+    (8, ("rightfoot", "mixamorigrightfoot", "j_bip_r_foot", "rightankle")),
+    (11, ("j_bip_r_toebase", "righttoebase", "mixamorigrighttoebase", "j_bip_r_toes", "righttoe")),
+]
+
+# 手指（VRM 命名，节数比 SMPL-X 一一对应）
+_FINGER_TABLE: list[tuple[int, tuple[str, ...]]] = [
+    (25, ("j_bip_l_index1", "leftindex1", "mixamoriglefthandindex1")),
+    (26, ("j_bip_l_index2", "leftindex2", "mixamoriglefthandindex2")),
+    (27, ("j_bip_l_index3", "leftindex3", "mixamoriglefthandindex3")),
+    (28, ("j_bip_l_middle1", "leftmiddle1", "mixamoriglefthandmiddle1")),
+    (29, ("j_bip_l_middle2", "leftmiddle2", "mixamoriglefthandmiddle2")),
+    (30, ("j_bip_l_middle3", "leftmiddle3", "mixamoriglefthandmiddle3")),
+    (31, ("j_bip_l_little1", "leftpinky1", "mixamoriglefthandpinky1")),
+    (32, ("j_bip_l_little2", "leftpinky2", "mixamoriglefthandpinky2")),
+    (33, ("j_bip_l_little3", "leftpinky3", "mixamoriglefthandpinky3")),
+    (34, ("j_bip_l_ring1", "leftring1", "mixamoriglefthandring1")),
+    (35, ("j_bip_l_ring2", "leftring2", "mixamoriglefthandring2")),
+    (36, ("j_bip_l_ring3", "leftring3", "mixamoriglefthandring3")),
+    (37, ("j_bip_l_thumb1", "leftthumb1", "mixamoriglefthandthumb1")),
+    (38, ("j_bip_l_thumb2", "leftthumb2", "mixamoriglefthandthumb2")),
+    (39, ("j_bip_l_thumb3", "leftthumb3", "mixamoriglefthandthumb3")),
+    (40, ("j_bip_r_index1", "rightindex1", "mixamorigrighthandindex1")),
+    (41, ("j_bip_r_index2", "rightindex2", "mixamorigrighthandindex2")),
+    (42, ("j_bip_r_index3", "rightindex3", "mixamorigrighthandindex3")),
+    (43, ("j_bip_r_middle1", "rightmiddle1", "mixamorigrighthandmiddle1")),
+    (44, ("j_bip_r_middle2", "rightmiddle2", "mixamorigrighthandmiddle2")),
+    (45, ("j_bip_r_middle3", "rightmiddle3", "mixamorigrighthandmiddle3")),
+    (46, ("j_bip_r_little1", "rightpinky1", "mixamorigrighthandpinky1")),
+    (47, ("j_bip_r_little2", "rightpinky2", "mixamorigrighthandpinky2")),
+    (48, ("j_bip_r_little3", "rightpinky3", "mixamorigrighthandpinky3")),
+    (49, ("j_bip_r_ring1", "rightring1", "mixamorigrighthandring1")),
+    (50, ("j_bip_r_ring2", "rightring2", "mixamorigrighthandring2")),
+    (51, ("j_bip_r_ring3", "rightring3", "mixamorigrighthandring3")),
+    (52, ("j_bip_r_thumb1", "rightthumb1", "mixamorigrighthandthumb1")),
+    (53, ("j_bip_r_thumb2", "rightthumb2", "mixamorigrighthandthumb2")),
+    (54, ("j_bip_r_thumb3", "rightthumb3", "mixamorigrighthandthumb3")),
+]
+
+# 兼容旧名
+_ALIASES = {SMPLX_NAMES[index]: list(aliases) for index, aliases in _BONE_TABLE}
 
 _COMPONENT_FLOAT = 5126
 
@@ -184,18 +234,31 @@ class _Appender:
 
 
 def _bone_map(doc: dict) -> dict:
-    """SMPL-X 关节索引 → 目标 GLB 的节点索引。"""
+    """SMPL-X 关节索引 → 目标 GLB 的节点索引（一个节点只认一次）。"""
     lookup = {}
     for index, node in enumerate(doc.get("nodes", [])):
         name = node.get("name")
         if name:
             lookup.setdefault(_normalize(name), index)
-    mapping = {}
-    for smplx_index, smplx_name in enumerate(SMPLX_NAMES):
-        for alias in _ALIASES.get(smplx_name, []):
+    mapping: dict[int, int] = {}
+    used: set[int] = set()
+
+    # 精确同名优先：自带骨架的节点名就是 SMPL-X 关节名（pelvis / left_shoulder …），
+    # 别名表里也有同名字符串，先按精确名对齐，避免 left_collar 抢走 left_shoulder。
+    for smplx_index, name in enumerate(SMPLX_NAMES):
+        node_index = lookup.get(_normalize(name))
+        if node_index is not None and node_index not in used:
+            mapping[smplx_index] = node_index
+            used.add(node_index)
+
+    for smplx_index, aliases in _BONE_TABLE + _FINGER_TABLE:
+        if smplx_index in mapping:
+            continue
+        for alias in aliases:
             node_index = lookup.get(_normalize(alias))
-            if node_index is not None:
+            if node_index is not None and node_index not in used:
                 mapping[smplx_index] = node_index
+                used.add(node_index)
                 break
     return mapping
 
@@ -212,23 +275,190 @@ def _quat_mul(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     ], axis=-1)
 
 
+def _mat_from_quat(q) -> np.ndarray:
+    """四元数 (..., 4) → 旋转矩阵 (..., 3, 3)，顺序 (x, y, z, w)。"""
+    q = np.asarray(q, dtype=np.float64)
+    norm = np.linalg.norm(q, axis=-1, keepdims=True)
+    q = np.divide(q, np.where(norm < 1e-12, 1.0, norm))
+    x, y, z, w = q[..., 0], q[..., 1], q[..., 2], q[..., 3]
+    out = np.empty(q.shape[:-1] + (3, 3), dtype=np.float64)
+    out[..., 0, 0] = 1.0 - 2.0 * (y * y + z * z)
+    out[..., 0, 1] = 2.0 * (x * y - z * w)
+    out[..., 0, 2] = 2.0 * (x * z + y * w)
+    out[..., 1, 0] = 2.0 * (x * y + z * w)
+    out[..., 1, 1] = 1.0 - 2.0 * (x * x + z * z)
+    out[..., 1, 2] = 2.0 * (y * z - x * w)
+    out[..., 2, 0] = 2.0 * (x * z - y * w)
+    out[..., 2, 1] = 2.0 * (y * z + x * w)
+    out[..., 2, 2] = 1.0 - 2.0 * (x * x + y * y)
+    return out
+
+
+def _quat_from_mat(m: np.ndarray) -> np.ndarray:
+    """旋转矩阵 (..., 3, 3) → 四元数 (..., 4)，顺序 (x, y, z, w)。"""
+    m = np.asarray(m, dtype=np.float64)
+    trace = m[..., 0, 0] + m[..., 1, 1] + m[..., 2, 2]
+    q = np.empty(m.shape[:-2] + (4,), dtype=np.float64)
+    positive = trace > 0
+    s = np.sqrt(np.where(positive, trace + 1.0, 1.0)) * 2.0
+    q[..., 3] = np.where(positive, 0.25 * s, 0.0)
+    q[..., 0] = np.where(positive, (m[..., 2, 1] - m[..., 1, 2]) / s, 0.0)
+    q[..., 1] = np.where(positive, (m[..., 0, 2] - m[..., 2, 0]) / s, 0.0)
+    q[..., 2] = np.where(positive, (m[..., 1, 0] - m[..., 0, 1]) / s, 0.0)
+    for condition, (i, j, k) in (
+        (~positive & (m[..., 0, 0] > m[..., 1, 1]) & (m[..., 0, 0] > m[..., 2, 2]), (0, 1, 2)),
+        (~positive & ~(m[..., 0, 0] > m[..., 1, 1]) & (m[..., 1, 1] > m[..., 2, 2]), (1, 2, 0)),
+        (~positive & ~(m[..., 0, 0] > m[..., 1, 1]) & ~(m[..., 1, 1] > m[..., 2, 2]), (2, 0, 1)),
+    ):
+        s2 = np.sqrt(np.where(condition, 1.0 + m[..., i, i] - m[..., j, j] - m[..., k, k], 1.0)) * 2.0
+        q[..., i] = np.where(condition, 0.25 * s2, q[..., i])
+        q[..., j] = np.where(condition, (m[..., j, i] + m[..., i, j]) / s2, q[..., j])
+        q[..., k] = np.where(condition, (m[..., k, i] + m[..., i, k]) / s2, q[..., k])
+        q[..., 3] = np.where(condition, (m[..., k, j] - m[..., j, k]) / s2, q[..., 3])
+    return q
+
+
+def _world_deltas(quats: np.ndarray) -> dict:
+    """SMPL-X 局部四元数 → 每个关节的累积世界增量矩阵 {(55, 3, 3)}。"""
+    cache: dict[int, np.ndarray] = {}
+    for index in range(len(SMPLX_PARENTS)):
+        matrix = _mat_from_quat(quats[:, index, :])
+        parent = SMPLX_PARENTS[index]
+        cache[index] = matrix if parent < 0 else np.einsum("nij,njk->nik", cache[parent], matrix)
+    return cache
+
+
+def _ensure_continuity(values: np.ndarray) -> np.ndarray:
+    """相邻帧四元数保持同半球，避免插值时翻转/抖动。"""
+    out = np.array(values, dtype=np.float64, copy=True)
+    for frame in range(1, out.shape[0]):
+        dot = np.sum(out[frame] * out[frame - 1], axis=-1, keepdims=True)
+        out[frame] = np.where(dot < 0.0, -out[frame], out[frame])
+    return out
+
+
+
+def _rodrigues(u, v):
+    """把单位向量 u 旋到 v 的最小旋转（3x3）。"""
+    u = np.asarray(u, dtype=np.float64)
+    v = np.asarray(v, dtype=np.float64)
+    u = u / max(np.linalg.norm(u), 1e-12)
+    v = v / max(np.linalg.norm(v), 1e-12)
+    cos = float(np.clip(np.dot(u, v), -1.0, 1.0))
+    if cos > 1.0 - 1e-9:
+        return np.eye(3)
+    if cos < -1.0 + 1e-9:
+        axis = np.cross(u, [1.0, 0.0, 0.0])
+        if np.linalg.norm(axis) < 1e-6:
+            axis = np.cross(u, [0.0, 1.0, 0.0])
+        axis = axis / np.linalg.norm(axis)
+        return 2.0 * np.outer(axis, axis) - np.eye(3)
+    axis = np.cross(u, v)
+    sin = np.linalg.norm(axis)
+    axis = axis / sin
+    angle = float(np.arctan2(sin, cos))
+    x, y, z = axis
+    c, s_ = np.cos(angle), np.sin(angle)
+    C = 1.0 - c
+    return np.array([
+        [c + x * x * C, x * y * C - z * s_, x * z * C + y * s_],
+        [y * x * C + z * s_, c + y * y * C, y * z * C - x * s_],
+        [z * x * C - y * s_, z * y * C + x * s_, c + z * z * C],
+    ])
+
+
+def _rest_world(doc):
+    """静止姿势下每个节点的世界旋转与位置（glTF 层级）。"""
+    nodes = doc.get("nodes", [])
+    parent = {}
+    for index, node in enumerate(nodes):
+        for child in node.get("children", []) or []:
+            parent[int(child)] = index
+    cache = {}
+
+    def resolve(index):
+        if index in cache:
+            return cache[index]
+        node = nodes[index]
+        rotation = _mat_from_quat(np.asarray(node.get("rotation") or [0.0, 0.0, 0.0, 1.0], dtype=np.float64))
+        translation = np.asarray(node.get("translation") or [0.0, 0.0, 0.0], dtype=np.float64)
+        scale = np.asarray(node.get("scale") or [1.0, 1.0, 1.0], dtype=np.float64)
+        if index in parent:
+            pr, pt, ps = resolve(parent[index])
+            cache[index] = (pr @ rotation, pt + pr @ (ps * translation), ps * scale)
+        else:
+            cache[index] = (rotation, translation, scale)
+        return cache[index]
+
+    for index in range(len(nodes)):
+        resolve(index)
+    return cache
+
+
+def _smplx_rest_joints():
+    """SMPL-X 模板姿势的 55 个关节世界坐标（T-pose，米）；取不到返回 None。"""
+    try:
+        from .loader import models_root
+
+        path = models_root() / "body_models" / "smplx" / "SMPLX_NEUTRAL.npz"
+        if not path.is_file():
+            return None
+        data = np.load(path, allow_pickle=True)
+        template = np.asarray(data["v_template"], dtype=np.float64)
+        regressor = data["J_regressor"]
+        if hasattr(regressor, "dot"):
+            joints = np.asarray(regressor.dot(template))
+        else:
+            joints = np.asarray(regressor, dtype=np.float64).dot(template)
+        return joints[: len(SMPLX_PARENTS)]
+    except Exception as exc:
+        print(f"[zmocap] 读取 SMPL-X 模板失败：{exc}")
+        return None
+
+
+
 def _add_animation(appender: _Appender, doc: dict, mapping: dict, quats: np.ndarray,
                    fps: float, root_track=None) -> bool:
     """给映射到的骨骼节点加 rotation 动画轨道。
 
-    SMPL-X 的局部旋转是“相对静止姿势的增量”，而角色骨骼的静止旋转通常不是单位
-    四元数，所以要先取出骨骼的 rest 旋转再右乘增量：q = q_rest ⊗ q_delta。
+    做法是相似变换（similarity transform），不猜方向、不拟合：
+
+    SMPL-X 的局部旋转 ``R_i`` 是相对 T-pose 的增量，沿骨链累乘得到世界增量
+    ``D_i = D_parent · R_i``。要让角色骨骼的**世界朝向**等于「它的 rest 朝向再叠加
+    同一个世界增量」，即 ``W_i(t) = W_rest(i) · D_i``，那么它的局部旋转必须是::
+
+        L_i(t) = D_parent⁻¹ · R_rest(i) · D_i
+               = D_parent⁻¹ · R_rest(i) · D_parent · R_i
+
+    中间那一对 ``D_parent⁻¹ · D_parent`` 不是恒等——正是它把「角色的 rest 朝向」
+    从「SMPL-X 的 rest 朝向」换算过去。漏掉它，误差会沿骨链一级级累积。
     """
-    times = (np.arange(quats.shape[0], dtype=np.float32) / float(fps))
+    frames = int(quats.shape[0])
+    times = (np.arange(frames, dtype=np.float32) / float(fps))
     time_accessor = appender.add_floats(times, "SCALAR", minmax=True)
+    deltas = _world_deltas(quats)
+    rest_world = _rest_world(doc)
+    identity = np.eye(3, dtype=np.float64)
+
     samplers, channels = [], []
     for smplx_index, node_index in sorted(mapping.items()):
-        delta = np.asarray(quats[:, smplx_index, :], dtype=np.float64)
+        local_source = _mat_from_quat(quats[:, smplx_index, :])
         rest = doc["nodes"][node_index].get("rotation") or [0.0, 0.0, 0.0, 1.0]
-        rest = np.asarray(rest, dtype=np.float64).reshape(1, 4)
-        values = _quat_mul(np.repeat(rest, delta.shape[0], axis=0), delta).astype(np.float32)
-        # glTF 四元数顺序是 (x, y, z, w)，与我们的输出一致
-        value_accessor = appender.add_floats(values, "VEC4")
+        rest_local = _mat_from_quat(np.asarray(rest, dtype=np.float64))
+
+        smplx_parent = SMPLX_PARENTS[smplx_index] if smplx_index < len(SMPLX_PARENTS) else -1
+        if smplx_parent >= 0 and smplx_parent in deltas:
+            parent_delta = deltas[smplx_parent]
+        else:
+            parent_delta = np.broadcast_to(identity, local_source.shape)
+
+        # L = D_parent⁻¹ · (R_rest · D_parent · R_i)
+        rotated_rest = np.einsum("jk,nkl->njl", rest_local, parent_delta)
+        local = np.einsum("nji,njk->nik", parent_delta, rotated_rest)
+        local = np.einsum("nij,njk->nik", local, local_source)
+
+        quats_out = _ensure_continuity(_quat_from_mat(local)).astype(np.float32)
+        value_accessor = appender.add_floats(quats_out, "VEC4")
         samplers.append({"input": time_accessor, "output": value_accessor,
                          "interpolation": "LINEAR"})
         channels.append({"sampler": len(samplers) - 1,
@@ -236,14 +466,19 @@ def _add_animation(appender: _Appender, doc: dict, mapping: dict, quats: np.ndar
     if not channels:
         return False
 
-    # 根骨（pelvis）跟位移：相对首帧的增量叠加到骨骼自身的静止平移上，
-    # 既不会在原点抽搐，也不会先跳到世界原点。
+    # 根骨位移：世界位移先按角色/SMPL-X 身高比缩放，再换算到父节点局部空间。
     pelvis = mapping.get(0)
     if pelvis is not None and root_track is not None:
         track = np.asarray(root_track, dtype=np.float64)
         rest_t = np.asarray(doc["nodes"][pelvis].get("translation") or [0.0, 0.0, 0.0],
                             dtype=np.float64)
-        values = (rest_t.reshape(1, 3) + (track - track[0])).astype(np.float32)
+        scale = _skeleton_scale(doc, mapping)
+        offset = (track - track[0]) * scale
+        parent_rotation, parent_scale = _parent_frame(doc, pelvis)
+        local_offset = offset @ parent_rotation if parent_rotation is not None else offset
+        if parent_scale is not None:
+            local_offset = local_offset / np.where(np.abs(parent_scale) < 1e-9, 1.0, parent_scale)
+        values = (rest_t.reshape(1, 3) + local_offset).astype(np.float32)
         value_accessor = appender.add_floats(values, "VEC3")
         samplers.append({"input": time_accessor, "output": value_accessor,
                          "interpolation": "LINEAR"})
@@ -256,6 +491,61 @@ def _add_animation(appender: _Appender, doc: dict, mapping: dict, quats: np.ndar
     return True
 
 
+def _skeleton_scale(doc: dict, mapping: dict) -> float:
+    """角色身高 / SMPL-X 身高；取不到模板姿势时退化为 1.0。"""
+    rest_joints = _smplx_rest_joints()
+    if rest_joints is None:
+        return 1.0
+    world = _rest_world(doc)
+    ratios = []
+    joints = np.asarray(rest_joints, dtype=np.float64)
+    for child, parent in enumerate(SMPLX_PARENTS[:22]):
+        if parent in mapping and child in mapping:
+            source = np.linalg.norm(joints[child] - joints[parent])
+            target = np.linalg.norm(world[mapping[child]][1] - world[mapping[parent]][1])
+            if source > 1e-6 and target > 1e-6:
+                ratios.append(target / source)
+    return float(np.median(ratios)) if ratios else 1.0
+
+
+def _depth(parent_map: dict, node_index: int) -> int:
+    depth, current = 0, parent_map.get(node_index)
+    while current is not None and depth < 64:
+        depth += 1
+        current = parent_map.get(current)
+    return depth
+
+
+def _parent_of(doc: dict, node_index: int):
+    for index, node in enumerate(doc.get("nodes", [])):
+        for child in node.get("children", []) or []:
+            if int(child) == int(node_index):
+                return index
+    return None
+
+
+def _parent_frame(doc: dict, node_index: int):
+    """返回父节点累积的 rest 世界旋转与缩放；根节点返回 (None, None)。"""
+    nodes = doc.get("nodes", [])
+    parent: dict[int, int] = {}
+    for index, node in enumerate(nodes):
+        for child in node.get("children", []) or []:
+            parent[int(child)] = index
+    chain, current = [], parent.get(node_index)
+    while current is not None:
+        chain.append(current)
+        current = parent.get(current)
+    rotation = np.eye(3, dtype=np.float64)
+    scale = np.ones(3, dtype=np.float64)
+    for index in reversed(chain):
+        node = nodes[index]
+        rotation = rotation @ _mat_from_quat(np.asarray(node.get("rotation") or [0.0, 0.0, 0.0, 1.0],
+                                                       dtype=np.float64))
+        scale = scale * np.asarray(node.get("scale") or [1.0, 1.0, 1.0], dtype=np.float64)
+    return rotation.T, scale
+    return True
+
+
 # SMPL-X 55 关节的父关节索引（-1 为根骨）
 SMPLX_PARENTS = [-1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9, 12, 13, 14, 16, 17,
                  18, 19, 15, 15, 15, 20, 25, 26, 20, 28, 29, 20, 31, 32, 20, 34, 35, 20,
@@ -263,10 +553,12 @@ SMPLX_PARENTS = [-1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9, 12, 13, 14, 16, 1
 
 
 def _build_mannequin(appender: _Appender, joints: np.ndarray, quats: np.ndarray, fps: float) -> dict:
-    """兜底骨架：真正的骨骼层级 + 每关节一个球，静止状态也看得见。
+    """兜底骨架：真正的骨骼层级 + 每关节一个球。
 
-    结构：J0(root) → J1 → … 层级骨骼，每个骨骼下挂一个球体网格；
-    动画只写旋转（根骨额外写世界平移），球跟着骨头走，不需要蒙皮。
+    动画**只写父子相对位移**（不写旋转）：第 0 帧骨架是 rest 姿势，后续每帧把
+    ``joints[t, i] - joints[t, parent]`` 写成该节点的局部平移。这样前向运动学的结果
+    与 SMPL-X 关节逐帧严格一致——之前用「第 0 帧当 rest + 绝对旋转」的做法会让
+    手指这类远离根节点的地方偏到脸的侧面去。
     """
     import trimesh
 
@@ -286,48 +578,44 @@ def _build_mannequin(appender: _Appender, joints: np.ndarray, quats: np.ndarray,
     doc["meshes"].append({"primitives": [{"attributes": {"POSITION": pos_accessor},
                                           "indices": index_accessor, "mode": 4}]})
 
+    count = joints.shape[0]
     rest = np.asarray(joints[0], dtype=np.float64)
     bone_ids = []
     for index in range(55):
         parent = SMPLX_PARENTS[index]
         offset = rest[index] - (rest[parent] if parent >= 0 else 0.0)
         doc["nodes"].append({
-            "name": f"J{index}",
+            "name": SMPLX_NAMES[index] if index < len(SMPLX_NAMES) else f"J{index}",
             "translation": [float(v) for v in offset],
             "rotation": [0.0, 0.0, 0.0, 1.0],
         })
         bone_ids.append(len(doc["nodes"]) - 1)
 
-    # 每个骨骼下挂一个球
     for index in range(55):
         doc["nodes"].append({"name": f"M{index}", "mesh": 0})
         sphere_id = len(doc["nodes"]) - 1
         doc["nodes"][bone_ids[index]].setdefault("children", []).append(sphere_id)
 
-    # 骨骼层级
     for index in range(55):
         parent = SMPLX_PARENTS[index]
         if parent >= 0:
             doc["nodes"][bone_ids[parent]].setdefault("children", []).append(bone_ids[index])
     doc["scenes"][0]["nodes"] = [bone_ids[0]]
 
-    count = joints.shape[0]
     times = (np.arange(count, dtype=np.float32) / float(fps))
     time_accessor = appender.add_floats(times, "SCALAR", minmax=True)
 
     samplers, channels = [], []
     for index in range(55):
-        values = np.asarray(quats[:, index, :], dtype=np.float32)
-        accessor = appender.add_floats(values, "VEC4")
+        parent = SMPLX_PARENTS[index]
+        if parent >= 0:
+            values = joints[:, index] - joints[:, parent]
+        else:
+            values = joints[:, index]
+        accessor = appender.add_floats(np.asarray(values, dtype=np.float32), "VEC3")
         samplers.append({"input": time_accessor, "output": accessor, "interpolation": "LINEAR"})
         channels.append({"sampler": len(samplers) - 1,
-                         "target": {"node": bone_ids[index], "path": "rotation"}})
-
-    # 根骨世界位移
-    accessor = appender.add_floats(np.asarray(joints[:, 0], dtype=np.float32), "VEC3")
-    samplers.append({"input": time_accessor, "output": accessor, "interpolation": "LINEAR"})
-    channels.append({"sampler": len(samplers) - 1,
-                     "target": {"node": bone_ids[0], "path": "translation"}})
+                         "target": {"node": bone_ids[index], "path": "translation"}})
 
     doc.setdefault("animations", []).append(
         {"name": "zmocap", "samplers": samplers, "channels": channels}
@@ -335,7 +623,8 @@ def _build_mannequin(appender: _Appender, joints: np.ndarray, quats: np.ndarray,
     return doc
 
 
-def build_glb(motion: dict, out_path: Path, character: str = "", mode: str = "auto") -> tuple[Path, dict]:
+def build_glb(motion: dict, out_path: Path, character: str = "", mode: str = "auto",
+              strict: bool = False) -> tuple[Path, dict]:
     """把动作写成 GLB；返回 (路径, 统计信息)。"""
     import numpy as np
 
@@ -359,6 +648,10 @@ def build_glb(motion: dict, out_path: Path, character: str = "", mode: str = "au
                 appender.finish()
                 info.update({"mode": "character", "bones": len(mapping)})
                 return _write_glb(Path(out_path), doc, appender.binary), info
+            if strict:
+                raise RuntimeError(
+                    f"角色 {Path(character).name} 没有匹配到人形骨骼（支持 Mixamo / VRM 命名）；"
+                    "把 skinned 关掉可用自带骨架")
             print("[zmocap] 角色骨架名未匹配（支持 Mixamo / VRM 命名），回退到自带骨架")
         except Exception as exc:
             print(f"[zmocap] 载入角色失败（{exc}），回退到自带骨架")
@@ -384,7 +677,9 @@ class ZMocapRig:
             "optional": {
                 # 角色完全由 `zmocap VRM Loader` 提供；不接就是自带骨架。
                 "character": ("ZMOCAP_CHARACTER",),
-                "mode": (["auto", "mannequin"], {"default": "auto"}),
+                # True = 套角色（蒙皮），False = 自带骨架。骨骼名不匹配时直接报错，
+                # 不再静默回退（静默回退曾让人以为“角色没生效”）。
+                "skinned": ("BOOLEAN", {"default": True}),
             },
         }
 
@@ -394,7 +689,9 @@ class ZMocapRig:
     FUNCTION = "run"
     CATEGORY = "zmocap"
 
-    def run(self, motion, filename, character=None, mode="auto"):
+    def run(self, motion, filename, character=None, skinned=True):
+        import hashlib
+
         import folder_paths
 
         if isinstance(character, dict):
@@ -403,8 +700,20 @@ class ZMocapRig:
             target = str(character or "").strip()
         if target.startswith("("):
             target = ""
+        mode = "auto" if bool(skinned) and target else "mannequin"
+        # 输出名带内容指纹：改了角色/模式/动作就换 URL，前端 three.js 必然重新加载，
+        # 否则同一个文件名会被浏览器缓存，切换看起来“没生效”。
+        params = motion.get("params") or {}
+        seed = "|".join([
+            str(motion.get("source")), str(int(np.asarray(motion["joints"]).shape[0])),
+            f"{float(motion.get('fps', 30.0)):.3f}", target, str(bool(skinned)),
+            f"{float(np.abs(np.asarray(motion['joints'])).sum()):.4f}",
+            str(int(np.asarray(params.get('betas')).sum() * 1000)) if 'betas' in params else "",
+        ])
+        digest = hashlib.sha1(seed.encode()).hexdigest()[:8]
         outdir = Path(folder_paths.get_output_directory())
-        path, info = build_glb(motion, outdir / f"{filename}.glb", character=target, mode=mode)
+        path, info = build_glb(motion, outdir / f"{filename}_{digest}.glb",
+                               character=target, mode=mode, strict=bool(skinned and target))
         print(f"[zmocap] rig {info['mode']} -> {path} ({info['bones']} bones, {info['frames']} frames)")
         # Preview3D 只认 output 目录下的相对文件名（前端用 /view?filename=... 加载），
         # 绝对路径会 404 变成空白预览，所以返回值给相对路径，绝对路径放在 ui 里。
