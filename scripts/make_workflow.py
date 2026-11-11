@@ -114,6 +114,18 @@ def build(video: str = "zmocap_test.mp4", character: str = "(none / built-in ske
     b.link(loader, 0, rig, 1, "ZMOCAP_CHARACTER")
 
 
+    # SOMA 枢纽：SMPL-X → SOMA(78 关节) → 角色（可换成其它目标的同类节点）
+    to_soma = b.node("ZMocapSMPL2SOMA", (2280, 500), (330, 120), [30.0, True],
+                     inputs=[("params", "ZMOCAP_MOTION")],
+                     outputs=[("soma", "ZMOCAP_SOMA"), ("info", "STRING")])
+    b.link(exmr, 0, to_soma, 0, "ZMOCAP_MOTION")
+
+    soma_rig = b.node("ZMocapSOMA2VRM", (2640, 500), (330, 150), [30.0, True],
+                      inputs=[("soma", "ZMOCAP_SOMA"), ("character", "ZMOCAP_CHARACTER")],
+                      outputs=[("glb", "STRING"), ("info", "STRING")])
+    b.link(to_soma, 0, soma_rig, 0, "ZMOCAP_SOMA")
+    b.link(loader, 0, soma_rig, 1, "ZMOCAP_CHARACTER")
+
     export = b.node("ZMocapExport", (2280, 720), (330, 130), ["zmocap_motion", True],
                     inputs=[("motion", "ZMOCAP_MOTION")], outputs=[("saved_path", "STRING")])
     b.link(exmr, 0, export, 0, "ZMOCAP_MOTION")
