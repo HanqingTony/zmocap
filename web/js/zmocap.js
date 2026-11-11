@@ -9,7 +9,7 @@ import { api } from "../../scripts/api.js";
 import { createViewer, inputFileUrl, outputFileUrl } from "./zmocap_viewer.js";
 
 const CHARACTER_NODES = new Set(["ZMocapVRMLoader"]);
-const RIG_NODES = new Set(["ZMocapRig"]);
+const RIG_NODES = new Set(["ZMocapRig", "ZMocapSMPLPreviewer", "ZMocapVRMPreviewer"]);
 
 function addPreviewWidget(node, viewer, container, title) {
   const hint = document.createElement("div");
