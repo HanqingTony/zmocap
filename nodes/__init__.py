@@ -5,11 +5,13 @@
     LoadVideo → Video Slice → VideoFrameSample → GetVideoComponents   (ComfyUI 官方)
       → ZMocapTrack → ZMocapFrames
       → ZMocapSapiens2Keypoints → ZMocapSam3DBodyFeatures → ZMocapHaMeRHandFeatures
-      → ZMocapExMR → ZMocapPreview3D / ZMocapExport
+      → ZMocapExMR → ZMocapRig ← ZMocapVRMLoader（→ 官方 Preview3D）→ ZMocapExport
+
+角色加载与绑定预览彻底解耦：VRM Loader 只负责“载入角色”，Rig 只负责“动作 + 角色 → GLB”。
 """
 
 from .body_features import ZMocapSam3DBodyFeatures
-from .character import ZMocapCharacterPreview
+from .character import ZMocapVRMLoader
 from .exmr import ZMocapExMR
 from .export import ZMocapExport
 from .frames_node import ZMocapFrames, ZMocapIntrinsics
@@ -32,7 +34,7 @@ NODE_CLASS_MAPPINGS = {
     "ZMocapHaMeRHandFeatures": ZMocapHaMeRHandFeatures,
     "ZMocapExMR": ZMocapExMR,
     "ZMocapRig": ZMocapRig,
-    "ZMocapCharacterPreview": ZMocapCharacterPreview,
+    "ZMocapVRMLoader": ZMocapVRMLoader,
     "ZMocapPreview3D": ZMocapPreview3D,
     "ZMocapExport": ZMocapExport,
 }
@@ -49,7 +51,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ZMocapHaMeRHandFeatures": "zmocap HaMeR Hand Features",
     "ZMocapExMR": "zmocap ExMR Solve",
     "ZMocapRig": "zmocap Rig (GLB)",
-    "ZMocapCharacterPreview": "zmocap Character Preview",
+    "ZMocapVRMLoader": "zmocap VRM Loader",
     "ZMocapPreview3D": "zmocap Skeleton Preview",
     "ZMocapExport": "zmocap Export NPZ/BVH",
 }

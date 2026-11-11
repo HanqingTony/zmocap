@@ -1,5 +1,14 @@
 """生成 ComfyUI 工作流模板（UI 格式），默认写到桌面。
 
+结构（motion 之后两条分支：一条看、一条存）::
+
+    LoadVideo → GetVideoComponents → ZMocapTrack / ZMocapFrames / ZMocapModels
+      → ZMocapSapiens2Keypoints / ZMocapSam3DBodyFeatures / ZMocapHaMeRHandFeatures
+      → ZMocapExMR ─┬→ ZMocapRig ← ZMocapVRMLoader → Preview3D（角色 + 动作）
+                    └→ ZMocapExport
+
+角色加载（ZMocapVRMLoader）与动作绑定（ZMocapRig）完全解耦。
+
 用法::
 
     python scripts/make_workflow.py <输出路径> [视频文件名] [角色文件名]
@@ -10,8 +19,6 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-
-MANNEQUIN = "(mannequin / built-in skeleton)"
 
 
 class Builder:
@@ -43,7 +50,7 @@ class Builder:
                 "extra": {}, "version": 0.4}
 
 
-def build(video: str = "zmocap_test.mp4", character: str = "Sendagaya_Shino.vrm") -> dict:
+def build(video: str = "zmocap_test.mp4", character: str = "(none / built-in skeleton)") -> dict:
     b = Builder()
 
     load = b.node("LoadVideo", (40, 80), (320, 100), [video],
@@ -94,25 +101,26 @@ def build(video: str = "zmocap_test.mp4", character: str = "Sendagaya_Shino.vrm"
     b.link(models, 0, exmr, 4, "ZMOCAP_MODELS")
     b.link(parts, 2, exmr, 5, "FLOAT")
 
-    rig = b.node("ZMocapRig", (1900, 80), (330, 160), ["zmocap_rig", character, "", "auto"],
-                 inputs=[("motion", "ZMOCAP_MOTION")], outputs=[("glb_path", "STRING")])
+    # 角色加载独立成节点：只负责“选/上传角色 → 角色对象”，不看动作。
+    loader = b.node("ZMocapVRMLoader", (1900, 380), (330, 90), [character],
+                    outputs=[("character", "ZMOCAP_CHARACTER"), ("glb_path", "STRING")])
+
+    # 绑定：motion + 角色 → GLB（唯一消费者关系：Rig 吃 motion，吃角色）
+    rig = b.node("ZMocapRig", (2280, 80), (330, 120), ["zmocap_rig", "auto"],
+                 inputs=[("motion", "ZMOCAP_MOTION"), ("character", "ZMOCAP_CHARACTER")],
+                 outputs=[("glb_path", "STRING")])
     b.link(exmr, 0, rig, 0, "ZMOCAP_MOTION")
+    b.link(loader, 0, rig, 1, "ZMOCAP_CHARACTER")
 
-    char_preview = b.node("ZMocapCharacterPreview", (1900, 280), (330, 80), [character],
-                          outputs=[("glb_path", "STRING")])
-
-    viewer_rig = b.node("Preview3D", (2280, 80), (420, 460), [""],
-                        inputs=[("model_file", "STRING")], title="Preview3D (rigged)")
-    viewer_char = b.node("Preview3D", (2280, 580), (420, 460), [""],
-                         inputs=[("model_file", "STRING")], title="Preview3D (character)")
+    viewer_rig = b.node("Preview3D", (2660, 80), (420, 460), [""],
+                        inputs=[("model_file", "STRING")], title="Preview3D (character + motion)")
     b.link(rig, 0, viewer_rig, 0, "STRING")
-    b.link(char_preview, 0, viewer_char, 0, "STRING")
 
-    skeleton = b.node("ZMocapPreview3D", (1900, 420), (330, 460), [600],
-                      inputs=[("motion", "ZMOCAP_MOTION")])
-    b.link(exmr, 0, skeleton, 0, "ZMOCAP_MOTION")
+    viewer_char = b.node("Preview3D", (2280, 380), (330, 300), [""],
+                         inputs=[("model_file", "STRING")], title="Preview3D (character only)")
+    b.link(loader, 1, viewer_char, 0, "STRING")
 
-    export = b.node("ZMocapExport", (1900, 920), (330, 130), ["zmocap_motion", True],
+    export = b.node("ZMocapExport", (2280, 720), (330, 130), ["zmocap_motion", True],
                     inputs=[("motion", "ZMOCAP_MOTION")], outputs=[("saved_path", "STRING")])
     b.link(exmr, 0, export, 0, "ZMOCAP_MOTION")
 
@@ -122,7 +130,7 @@ def build(video: str = "zmocap_test.mp4", character: str = "Sendagaya_Shino.vrm"
 if __name__ == "__main__":
     out = Path(sys.argv[1] if len(sys.argv) > 1 else "zmocap-exmr.json").expanduser()
     video = sys.argv[2] if len(sys.argv) > 2 else "zmocap_test.mp4"
-    character = sys.argv[3] if len(sys.argv) > 3 else "Sendagaya_Shino.vrm"
+    character = sys.argv[3] if len(sys.argv) > 3 else "(none / built-in skeleton)"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(build(video, character), ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"写入 {out}")

@@ -9,7 +9,7 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
-const CHARACTER_NODES = new Set(["ZMocapRig", "ZMocapCharacterPreview"]);
+const CHARACTER_NODES = new Set(["ZMocapVRMLoader"]);
 const ACCEPT = ".vrm,.glb,.gltf,.VRM,.GLB,.GLTF";
 
 async function uploadCharacter(file) {

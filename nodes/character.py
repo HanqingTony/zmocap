@@ -1,11 +1,12 @@
-"""角色素材节点：扫描 ``models/zmocap/characters`` 里的 GLB/VRM 并提供预览。
+"""ZMocap VRM Loader：读取角色文件（VRM / GLB / GLTF），输出可复用的角色对象。
 
-用途：
-- ``ZMocapCharacterPreview``：把角色文件原样交给官方 ``Preview3D`` 看外观
-  （这样挑角色时不用先跑推理）。
-- 上传：前端 ``web/js/zmocap.js`` 在节点上加「upload vrm/glb...」按钮，
-  走官方 ``POST /upload/image`` 存到 ``input/``，然后自动填进下拉框。
-- ``character_choices()``：给 ``ZMocapRig`` 的下拉框用，避免手输路径。
+职责单一：**只做"载入角色"**，不做动作、不做渲染。
+- 校验文件、解析骨骼映射（Mixamo / VRM humanoid 命名）、统计网格
+- 复制一份到 output 目录并给出可被官方 ``Preview3D`` 播放的相对路径
+  （这样上传的角色本身也能直接预览）
+- 输出 ``ZMOCAP_CHARACTER``，供 ``zmocap Rig (GLB)`` 使用
+
+上传按钮在 ``web/js/zmocap.js``：走官方 ``POST /upload/image`` 存到 ``input/``。
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-MANNEQUIN = "(mannequin / built-in skeleton)"
+MANNEQUIN = "(none / built-in skeleton)"
 CHARACTER_EXTS = {".glb", ".gltf", ".vrm"}
 
 
@@ -42,7 +43,7 @@ def _scan(root: Path) -> list[str]:
 
 
 def character_choices() -> list[str]:
-    """下拉框选项：内置骨架 + 角色目录 + 前端上传到 input/ 的文件。"""
+    """下拉框选项：无角色 + 角色目录 + 前端上传到 input/ 的文件。"""
     names: list[str] = []
     for root in (characters_dir(), input_dir()):
         for name in sorted(_scan(root)):
@@ -52,7 +53,7 @@ def character_choices() -> list[str]:
 
 
 def resolve_character(value: str) -> str:
-    """把下拉框的值解析成绝对路径；内置骨架返回空串。"""
+    """把下拉框/路径解析成绝对路径；无角色返回空串。"""
     text = str(value or "").strip()
     if not text or text == MANNEQUIN:
         return ""
@@ -66,8 +67,8 @@ def resolve_character(value: str) -> str:
     return ""
 
 
-class ZMocapCharacterPreview:
-    """把角色文件（GLB/VRM）复制到 output 并返回路径，供官方 Preview3D 预览。"""
+class ZMocapVRMLoader:
+    """载入角色文件，输出 ``ZMOCAP_CHARACTER``（同时给出可预览的 GLB 相对路径）。"""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -77,22 +78,42 @@ class ZMocapCharacterPreview:
             }
         }
 
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("glb_path",)
-    OUTPUT_NODE = True
+    RETURN_TYPES = ("ZMOCAP_CHARACTER", "STRING")
+    RETURN_NAMES = ("character", "glb_path")
     FUNCTION = "run"
     CATEGORY = "zmocap"
 
     def run(self, character):
         import folder_paths
 
+        from .retarget import _bone_map, _read_glb
+
         source = resolve_character(character)
         if not source:
-            raise ValueError(f"角色文件不存在：{character}（放到 {characters_dir()} 里再选）")
+            raise ValueError(f"角色文件不存在：{character}（放到 {characters_dir()} 或上传）")
+
+        doc, _ = _read_glb(Path(source))
+        mapping = _bone_map(doc)
+        if not mapping:
+            print(f"[zmocap] {Path(source).name}: 没匹配到 Mixamo/VRM 骨骼名，Rig 会回退到自带骨架")
+
         outdir = Path(folder_paths.get_output_directory())
         outdir.mkdir(parents=True, exist_ok=True)
-        # 统一成 .glb 后缀：VRM 本身就是 GLB 容器，官方 Preview3D 按后缀选加载器。
+        # 统一成 .glb：VRM 本身就是 GLB 容器，官方 Preview3D 按后缀挑加载器。
         target = outdir / f"zmocap_character_{Path(source).stem}.glb"
-        shutil.copyfile(source, target)
-        print(f"[zmocap] character preview -> {target}")
-        return {"ui": {"zmocap_character": [{"path": str(target)}]}, "result": (target.name,)}
+        if Path(source).resolve() != target.resolve():
+            shutil.copyfile(source, target)
+
+        meshes = len(doc.get("meshes", []))
+        print(f"[zmocap] character {Path(source).name}: {len(doc.get('nodes', []))} nodes, "
+              f"{meshes} meshes, {len(mapping)}/21 humanoid bones -> {target.name}")
+
+        payload = {
+            "path": source,
+            "name": Path(source).name,
+            "preview": target.name,
+            "nodes": len(doc.get("nodes", [])),
+            "meshes": meshes,
+            "bones": len(mapping),
+        }
+        return {"ui": {"zmocap_character": [payload]}, "result": (payload, target.name)}

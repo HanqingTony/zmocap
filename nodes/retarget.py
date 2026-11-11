@@ -376,17 +376,14 @@ class ZMocapRig:
 
     @classmethod
     def INPUT_TYPES(cls):
-        from .character import character_choices
-
         return {
             "required": {
                 "motion": ("ZMOCAP_MOTION",),
                 "filename": ("STRING", {"default": "zmocap_rig"}),
-                "character": (character_choices(), {"default": "(mannequin / built-in skeleton)"}),
             },
             "optional": {
-                "character_path": ("STRING", {"default": "", "multiline": False,
-                                               "tooltip": "角色目录之外的绝对路径（留空则用上面的下拉框）"}),
+                # 角色完全由 `zmocap VRM Loader` 提供；不接就是自带骨架。
+                "character": ("ZMOCAP_CHARACTER",),
                 "mode": (["auto", "mannequin"], {"default": "auto"}),
             },
         }
@@ -397,11 +394,15 @@ class ZMocapRig:
     FUNCTION = "run"
     CATEGORY = "zmocap"
 
-    def run(self, motion, filename, character="(mannequin / built-in skeleton)",
-            character_path="", mode="auto"):
+    def run(self, motion, filename, character=None, mode="auto"):
         import folder_paths
 
-        target = str(character_path or "").strip() or character
+        if isinstance(character, dict):
+            target = str(character.get("path") or "")
+        else:
+            target = str(character or "").strip()
+        if target.startswith("("):
+            target = ""
         outdir = Path(folder_paths.get_output_directory())
         path, info = build_glb(motion, outdir / f"{filename}.glb", character=target, mode=mode)
         print(f"[zmocap] rig {info['mode']} -> {path} ({info['bones']} bones, {info['frames']} frames)")
