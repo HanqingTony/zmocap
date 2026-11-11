@@ -16,13 +16,22 @@
 
 | 节点 | 作用 | 状态 |
 |---|---|---|
-| `zmocap · 环境自检` | 打印 python/torch/CUDA/模型目录 | ✅ 已实现 |
-| `zmocap · 人物跟踪` | YOLOX 检测 + BoT-SORT + OSNet 重识别 → tracks | 待实现 |
-| `zmocap · 裁剪批次` | 按 track 裁出 IMAGE 批张量 | 待实现 |
-| `zmocap · ExMR 骨骼` | Sapiens2 关键点 → ExMR → SMPL-X 参数 | 待实现 |
+| `zmocap · 环境自检` | 打印 python/torch/CUDA/模型目录 | ✅ |
+| `zmocap · 模型` | 解析 `models/zmocap`，报告缺件 | ✅ |
+| `zmocap · 人物跟踪` | YOLO 检测 + IoU 关联（多人物里选第 N 个） | ✅ 首版 |
+| `zmocap · ExMR 骨骼` | Sapiens2 关键点 → SAM Body/HaMeR 特征 → ExMR → SMPL-X + 关节 | ✅ 首版 |
+| `zmocap · 3D 预览` | 节点内 canvas 投影渲染（可拖动旋转、点击暂停） | ✅ |
+| `zmocap · 导出` | NPZ（关节 + 参数）+ BVH | ✅ 首版 |
 | `zmocap · 足部锁定` | 接触检测 + ADMM + 接触 IK 修正 | 待实现 |
-| `zmocap · 3D 预览` | 节点内 three.js 骨骼渲染 | 待实现 |
-| `zmocap · 导出` | BVH / NPZ | 待实现 |
+
+模型布局（`ComfyUI/models/zmocap/`）：
+
+```
+exmr/exmr.safetensors                 exmr/sapiens2_1b_pose.safetensors
+body_models/smplx/SMPLX_NEUTRAL.npz   flowhmr/sam/{model.ckpt,model_config.yaml,assets/mhr_model.pt}
+handflow/hamer.ckpt                   handflow/mano_mean_params.npz
+yolo/yolov8x.pt
+```
 
 ## 安装
 
