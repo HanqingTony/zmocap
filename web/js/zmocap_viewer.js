@@ -47,7 +47,7 @@ export function createViewer(container) {
 
   /** 触地光圈：平铺在地面上，按帧开关，蓝=左、红=右。 */
   function makeRing(side) {
-    const geometry = new THREE.RingGeometry(0.055, 0.085, 32);
+    const geometry = new THREE.RingGeometry(0.09, 0.135, 40);
     const material = new THREE.MeshBasicMaterial({
       color: CONTACT_COLORS[side],
       transparent: true,
@@ -69,14 +69,16 @@ export function createViewer(container) {
     if (!contact) return;
     const fps = contact.fps || 30;
     const total = contact.frames || 1;
-    const index = Math.min(total - 1, Math.max(0, Math.floor(elapsed * fps)));
+    // 动画循环播放时 elapsed 会一直涨：按片段时长取模，否则只在第一轮里“有帧可查”。
+    const looped = duration > 0 ? elapsed % duration : elapsed;
+    const index = Math.min(total - 1, Math.max(0, Math.floor(looped * fps)));
     for (const side of ["left", "right"]) {
       const data = contact[side];
       const ring = rings[side];
-      const on = data?.on?.[index];
       const position = data?.pos?.[index];
-      ring.visible = !!on && Array.isArray(position);
-      if (ring.visible) ring.position.set(position[0], position[1] + 0.002, position[2]);
+      const visible = Array.isArray(position);
+      ring.visible = visible;
+      if (visible) ring.position.set(position[0], position[1] + 0.002, position[2]);
     }
   }
 
@@ -91,6 +93,7 @@ export function createViewer(container) {
   let disposed = false;
   let frames = [];
   let elapsed = 0;
+  let duration = 0;
   let contact = null;
 
   const clock = new THREE.Clock();
@@ -224,6 +227,7 @@ export function createViewer(container) {
           if (object.isSkinnedMesh) object.frustumCulled = false;
         });
         scene.add(current);
+        duration = gltf.animations?.[0]?.duration || 0;
         if (gltf.animations?.length) {
           mixer = new THREE.AnimationMixer(current);
           for (const clip of gltf.animations) mixer.clipAction(clip).play();

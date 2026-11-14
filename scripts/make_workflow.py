@@ -115,7 +115,7 @@ def build(video: str = "zmocap_test.mp4") -> dict:
 
     # 预览：SMPL-X 自带网格（零重定向，参数与网格同源）。SOMA/VRM 链路暂时冻结。
     # 不要在这里接 ZMocapVRMLoader：那会走 build_glb 的 SMPL→VRM 直连（错误路径）。
-    preview = b.node("ZMocapSMPLPreviewer", (2280, 80), (340, 120), ["zmocap_smpl", True],
+    preview = b.node("ZMocapSMPLPreviewer", (2280, 80), (340, 120), ["zmocap_smpl", True, True],
                      inputs=[("motion", "ZMOCAP_MOTION"), ("contacts", "ZMOCAP_CONTACTS")],
                      outputs=[("glb_path", "STRING")])
     b.link(contact, 0, preview, 0, "ZMOCAP_MOTION")
