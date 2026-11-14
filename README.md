@@ -12,17 +12,37 @@
 3. **只出骨骼**：节点输出 SMPL-X 关节序列 `(T, J, 3)` 与参数；预览在节点内用 three.js 渲染，不依赖时间轴。
 4. **用 ComfyUI 的方式重写**：视频解码用 VideoHelperSuite，批处理用 IMAGE 张量，缓存用节点执行缓存（不改它的项目/阶段系统）。
 
-## 节点（规划）
+## 版本
 
-| 节点 | 作用 | 状态 |
-|---|---|---|
-| `zmocap · 环境自检` | 打印 python/torch/CUDA/模型目录 | ✅ |
-| `zmocap · 模型` | 解析 `models/zmocap`，报告缺件 | ✅ |
-| `zmocap · 人物跟踪` | YOLO 检测 + IoU 关联（多人物里选第 N 个） | ✅ 首版 |
-| `zmocap · ExMR 骨骼` | Sapiens2 关键点 → SAM Body/HaMeR 特征 → ExMR → SMPL-X + 关节 | ✅ 首版 |
-| `zmocap · 3D 预览` | 节点内 canvas 投影渲染（可拖动旋转、点击暂停） | ✅ |
-| `zmocap · 导出` | NPZ（关节 + 参数）+ BVH | ✅ 首版 |
-| `zmocap · 足部锁定` | 接触检测 + ADMM + 接触 IK 修正 | 待实现 |
+当前 **0.2.0**：动作识别 + 预览已稳定（SMPL-X 链路与 RGBMocap 逐帧对照一致）。
+
+| 版本 | 内容 |
+|---|---|
+| 0.1.0 | 环境自检、模型解析、YOLO 跟踪、ExMR 推理、NPZ/BVH 导出 |
+| 0.2.0 | SMPL-X 原生网格预览、节点内 three.js 视图、骨骼小棍图层、VRM/SOMA 两条重定向线、预览器拆分 |
+
+## 节点（17 个）
+
+| 节点 | 作用 |
+|---|---|
+| `zmocap Environment` | 打印 python/torch/CUDA/模型目录 |
+| `zmocap Models` | 解析 `models/zmocap`，报告缺件 |
+| `zmocap Load Video` | 读视频为 IMAGE 批（PyAV，可指定采样 fps/截取帧数） |
+| `zmocap Track` | YOLO 检测 + IoU 关联，选第 N 个人物 |
+| `zmocap Frames` | IMAGE 批 → 帧目录（供引擎读盘） |
+| `zmocap Intrinsics` | 估算相机内参 |
+| `zmocap Sapiens2 Keypoints` | 448×336 关键点（body/hand/foot） |
+| `zmocap SAM3D Body Features` | SAM3D 身体特征 |
+| `zmocap HaMeR Hand Features` | HaMeR 手部特征 |
+| `zmocap ExMR Solve` | 特征 → SMPL-X 参数 + 关节序列 |
+| `zmocap SMPL Previewer` | 用官方 SMPL-X 网格预览（零重定向，作为对照基准） |
+| `zmocap VRM Previewer` | 把 motion 绑到 VRM 角色并预览 |
+| `zmocap VRM Loader` | 选择/上传角色文件 |
+| `zmocap SMPL2SOMA` | SMPL-X → SOMA(78 关节) 通用运动 |
+| `zmocap SOMA2VRM` | SOMA → 通用 humanoid motion |
+| `zmocap Foot Contact` | 足部接触检测 |
+| `zmocap Contact Load` | 载入已算好的接触数据 |
+| `zmocap Export NPZ/BVH` | 导出 NPZ（关节 + 参数）与 BVH |
 
 模型布局（`ComfyUI/models/zmocap/`）：
 

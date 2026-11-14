@@ -1,5 +1,6 @@
-"""导出节点：NPZ + BVH。"""
+"""导出节点：NPZ + BVH + contacts JSON/NPZ。"""
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -17,7 +18,10 @@ class ZMocapExport:
                 "motion": ("ZMOCAP_MOTION",),
                 "filename": ("STRING", {"default": "zmocap_motion"}),
             },
-            "optional": {"write_bvh": ("BOOLEAN", {"default": True})},
+            "optional": {
+                "write_bvh": ("BOOLEAN", {"default": True}),
+                "contacts": ("ZMOCAP_CONTACTS",),
+            },
         }
 
     RETURN_TYPES = ("STRING",)
@@ -25,7 +29,7 @@ class ZMocapExport:
     FUNCTION = "run"
     CATEGORY = "zmocap"
 
-    def run(self, motion, filename, write_bvh=True):
+    def run(self, motion, filename, write_bvh=True, contacts=None):
         try:
             import folder_paths
 
@@ -35,14 +39,67 @@ class ZMocapExport:
         outdir.mkdir(parents=True, exist_ok=True)
         joints = np.asarray(motion["joints"], dtype=np.float32)
         npz_path = outdir / f"{filename}.npz"
-        payload = {k: (v.numpy() if hasattr(v, "numpy") else np.asarray(v)) for k, v in motion["params"].items()}
+        payload = {k: _array(v) for k, v in motion["params"].items()}
+        # 保留 contact 所需的原始证据，便于重新检测/校验。
+        if motion.get("static_conf_logits") is not None:
+            payload["static_conf_logits"] = _array(motion["static_conf_logits"])
+        if contacts is not None:
+            for source, target in (("contact", "contact"),
+                                   ("probability", "contact_probability"),
+                                   ("height", "contact_height")):
+                value = (contacts.get("arrays") or {}).get(source)
+                if value is not None:
+                    payload[target] = _array(value)
         np.savez_compressed(npz_path, joints=joints, fps=motion.get("fps", 30.0), **payload)
         paths = [str(npz_path)]
         if write_bvh:
             bvh_path = outdir / f"{filename}.bvh"
             bvh_path.write_text(_bvh(joints, float(motion.get("fps", 30.0))), encoding="utf-8")
             paths.append(str(bvh_path))
+        if contacts is not None:
+            paths.extend(_write_contacts(outdir, filename, motion, contacts))
         return ("\n".join(paths),)
+
+
+def _array(value):
+    if hasattr(value, "detach"):
+        value = value.detach().cpu()
+    if hasattr(value, "numpy"):
+        value = value.numpy()
+    return np.asarray(value)
+
+
+def _jsonable(value):
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, dict):
+        return {key: _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    return value
+
+
+def _write_contacts(outdir: Path, filename: str, motion: dict, contacts: dict):
+    """JSON 存区间/元数据，NPZ 存逐帧数组；两者用同名配对。"""
+    document = {key: value for key, value in contacts.items() if key != "arrays"}
+    document = _jsonable(document)
+    json_path = outdir / f"{filename}.contacts.json"
+    json_path.write_text(json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8")
+    arrays = {
+        key: _array(value)
+        for key, value in (contacts.get("arrays") or {}).items()
+        if value is not None
+    }
+    npz_path = outdir / f"{filename}.contacts.npz"
+    np.savez_compressed(
+        npz_path,
+        fps=float(contacts.get("fps", motion.get("fps", 30.0))),
+        frames=int(contacts.get("frames", len(np.asarray(motion["joints"])))),
+        **arrays,
+    )
+    return [str(json_path), str(npz_path)]
 
 
 SMPLX_PARENTS = [

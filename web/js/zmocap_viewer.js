@@ -94,8 +94,62 @@ export function createViewer(container) {
     mixer = null;
   }
 
+  /**
+   * 当前姿态的包围盒。
+   *
+   * `Box3.setFromObject()` 对 SkinnedMesh 取的是绑定姿态（SMPL-X 的 T-pose，
+   * 脚在 y=-1.29），而动画会把根节点抬到世界地面 y=0；直接用绑定姿态会让
+   * 角色看起来“飘在半空”。这里对蒙皮网格按骨骼采样当前姿态，普通网格/骨骼
+   * 取世界位置，得到真正的地面。
+   */
+  function sceneBounds() {
+    const box = new THREE.Box3();
+    const vertex = new THREE.Vector3();
+    const point = new THREE.Vector3();
+    let found = false;
+    current.updateMatrixWorld(true);
+    // 有蒙皮网格时只按蒙皮网格算地面：小棍是显示层，可能比脚底更低。
+    const skinned = [];
+    current.traverse((object) => {
+      if (object.isSkinnedMesh && object.skeleton
+          && object.geometry?.attributes?.position
+          && object.geometry.attributes.skinIndex
+          && object.geometry.attributes.skinWeight) {
+        skinned.push(object);
+      }
+    });
+    if (skinned.length) {
+      for (const object of skinned) {
+        const position = object.geometry.attributes.position;
+        const step = Math.max(1, Math.floor(position.count / 20000));
+        for (let index = 0; index < position.count; index += step) {
+          vertex.fromBufferAttribute(position, index);
+          object.applyBoneTransform(index, vertex);
+          vertex.applyMatrix4(object.matrixWorld);
+          box.expandByPoint(vertex);
+        }
+        found = true;
+      }
+    }
+    if (found) return box;
+    current.traverse((object) => {
+      if (object.isMesh) {
+        const meshBox = new THREE.Box3().setFromObject(object);
+        if (!meshBox.isEmpty()) {
+          box.union(meshBox);
+          found = true;
+        }
+      } else if (object.isBone) {
+        box.expandByPoint(object.getWorldPosition(point));
+        found = true;
+      }
+    });
+    if (!found) box.setFromObject(current);
+    return box;
+  }
+
   function look(scaleHint) {
-    const box = new THREE.Box3().setFromObject(current);
+    const box = sceneBounds();
     if (box.isEmpty()) return;
     const size = new THREE.Vector3();
     const center = new THREE.Vector3();
@@ -127,6 +181,8 @@ export function createViewer(container) {
           mixer = new THREE.AnimationMixer(current);
           for (const clip of gltf.animations) mixer.clipAction(clip).play();
           playing = autoplay;
+          // 先应用第 0 帧，否则 sceneBounds() 看到的是 T-pose 绑定姿态。
+          mixer.update(0);
         }
         this.setLayer(this.layer || "skinned");
         look(true);

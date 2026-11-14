@@ -1,17 +1,22 @@
-"""生成 ComfyUI 工作流模板（UI 格式），默认写到桌面。
+"""生成 ComfyUI 工作流模板（UI 格式）。
 
-结构（motion 之后两条分支：一条看、一条存）::
+当前冻结范围：只到 SMPL Previewer / Export，不再生成 SOMA/VRM 分支::
 
     LoadVideo → GetVideoComponents → ZMocapTrack / ZMocapFrames / ZMocapModels
       → ZMocapSapiens2Keypoints / ZMocapSam3DBodyFeatures / ZMocapHaMeRHandFeatures
-      → ZMocapExMR → ZMocapSMPL2SOMA → ZMocapSOMA2VRM → ZMocapVRMPreviewer ← ZMocapVRMLoader
-                    └→ ZMocapExport
+      → ZMocapExMR → ZMocapFootContact → ZMocapSMPLPreviewer
+                                      └→ ZMocapExport（NPZ + contacts JSON/NPZ）
 
-转换类节点单进单出、只处理 motion；角色只在 ZMocap VRM Previewer 这一步出现。
+SMPL Previewer 的 `skinned` 开关：开 = SMPL-X 蒙皮网格，关 = 骨骼小棍（火柴人）。
+注意：不要接 ZMocapVRMLoader 的 character 输入——那是 SMPL→VRM 的直接重定向
+（非零重定向，已知错误路径）。SMPL 皮肤/模型需要与 SMPL-X 同骨架，另行加载。
+
+Foot Contact 输出 motion（原样透传）和 contacts；Export 接 contacts 后
+额外写 `<filename>.contacts.json` + `<filename>.contacts.npz`。
 
 用法::
 
-    python scripts/make_workflow.py <输出路径> [视频文件名] [角色文件名]
+    python scripts/make_workflow.py <输出路径> [视频文件名]
 """
 
 from __future__ import annotations
@@ -50,7 +55,7 @@ class Builder:
                 "extra": {}, "version": 0.4}
 
 
-def build(video: str = "zmocap_test.mp4", character: str = "(none / built-in skeleton)") -> dict:
+def build(video: str = "zmocap_test.mp4") -> dict:
     b = Builder()
 
     load = b.node("LoadVideo", (40, 80), (320, 100), [video],
@@ -102,20 +107,24 @@ def build(video: str = "zmocap_test.mp4", character: str = "(none / built-in ske
     b.link(models, 0, exmr, 4, "ZMOCAP_MODELS")
     b.link(parts, 2, exmr, 5, "FLOAT")
 
-    # 角色加载独立成节点：只负责“选/上传角色 → 角色对象”，不看动作。
-    loader = b.node("ZMocapVRMLoader", (1900, 380), (330, 90), [character],
-                    outputs=[("character", "ZMOCAP_CHARACTER"), ("glb_path", "STRING")])
+    # 脚接触：static_conf + 脚底高度 → 左右脚区间；motion 原样透传。
+    contact = b.node("ZMocapFootContact", (1900, 80), (340, 220), [0.8, 0.05, 0.7, 0.8, 2, 2],
+                     inputs=[("motion", "ZMOCAP_MOTION")],
+                     outputs=[("motion", "ZMOCAP_MOTION"), ("contacts", "ZMOCAP_CONTACTS")])
+    b.link(exmr, 0, contact, 0, "ZMOCAP_MOTION")
 
-    # 纯 motion 的格式转换：SMPL-X → SOMA → 标准 humanoid，全程不碰角色
-    # 预览：先用身份自带的 SMPL-X 网格做对照（零重定向，参数与网格同源）
-    preview = b.node("ZMocapSMPLPreviewer", (2240, 80), (340, 120), ["zmocap_smpl", True],
+    # 预览：SMPL-X 自带网格（零重定向，参数与网格同源）。SOMA/VRM 链路暂时冻结。
+    # 不要在这里接 ZMocapVRMLoader：那会走 build_glb 的 SMPL→VRM 直连（错误路径）。
+    preview = b.node("ZMocapSMPLPreviewer", (2280, 80), (340, 120), ["zmocap_smpl", True],
                      inputs=[("motion", "ZMOCAP_MOTION")],
                      outputs=[("glb_path", "STRING")])
-    b.link(exmr, 0, preview, 0, "ZMOCAP_MOTION")
+    b.link(contact, 0, preview, 0, "ZMOCAP_MOTION")
 
-    export = b.node("ZMocapExport", (2280, 720), (330, 130), ["zmocap_motion", True],
-                    inputs=[("motion", "ZMOCAP_MOTION")], outputs=[("saved_path", "STRING")])
-    b.link(exmr, 0, export, 0, "ZMOCAP_MOTION")
+    export = b.node("ZMocapExport", (2280, 380), (330, 130), ["zmocap_motion", True],
+                    inputs=[("motion", "ZMOCAP_MOTION"), ("contacts", "ZMOCAP_CONTACTS")],
+                    outputs=[("saved_path", "STRING")])
+    b.link(contact, 0, export, 0, "ZMOCAP_MOTION")
+    b.link(contact, 1, export, 1, "ZMOCAP_CONTACTS")
 
     return b.dump()
 
@@ -123,7 +132,6 @@ def build(video: str = "zmocap_test.mp4", character: str = "(none / built-in ske
 if __name__ == "__main__":
     out = Path(sys.argv[1] if len(sys.argv) > 1 else "zmocap-exmr.json").expanduser()
     video = sys.argv[2] if len(sys.argv) > 2 else "zmocap_test.mp4"
-    character = sys.argv[3] if len(sys.argv) > 3 else "(none / built-in skeleton)"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(build(video, character), ensure_ascii=False, indent=1), encoding="utf-8")
+    out.write_text(json.dumps(build(video), ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"写入 {out}")

@@ -5,7 +5,9 @@
     LoadVideo → Video Slice → VideoFrameSample → GetVideoComponents   (ComfyUI 官方)
       → ZMocapTrack → ZMocapFrames
       → ZMocapSapiens2Keypoints → ZMocapSam3DBodyFeatures → ZMocapHaMeRHandFeatures
-      → ZMocapExMR → SMPL2SOMA → SOMA2VRM → ZMocapVRMPreviewer ← ZMocapVRMLoader（→ 官方 Preview3D）→ ZMocapExport
+      → ZMocapExMR → ZMocapFootContact → ZMocapSMPLPreviewer
+                    │                 └→ ZMocapExport（NPZ/BVH + contacts JSON/NPZ）
+                    └→ SMPL2SOMA → SOMA2VRM → ZMocapVRMPreviewer ← ZMocapVRMLoader
 
 角色加载与绑定预览彻底解耦：VRM Loader 只负责“载入角色”，Rig 只负责“动作 + 角色 → GLB”。
 """
@@ -13,6 +15,7 @@
 from .body_features import ZMocapSam3DBodyFeatures
 from .character import ZMocapVRMLoader
 from .exmr import ZMocapExMR
+from .foot_contact import ZMocapContactLoad, ZMocapFootContact
 from .export import ZMocapExport
 from .format_soma import ZMocapSMPL2SOMA, ZMocapSOMA2VRM
 from .frames_node import ZMocapFrames, ZMocapIntrinsics
@@ -35,6 +38,8 @@ NODE_CLASS_MAPPINGS = {
     "ZMocapSam3DBodyFeatures": ZMocapSam3DBodyFeatures,
     "ZMocapHaMeRHandFeatures": ZMocapHaMeRHandFeatures,
     "ZMocapExMR": ZMocapExMR,
+    "ZMocapFootContact": ZMocapFootContact,
+    "ZMocapContactLoad": ZMocapContactLoad,
     "ZMocapSMPLPreviewer": ZMocapSMPLPreviewer,
     "ZMocapVRMPreviewer": ZMocapVRMPreviewer,
     "ZMocapSMPL2SOMA": ZMocapSMPL2SOMA,
@@ -55,6 +60,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ZMocapSam3DBodyFeatures": "zmocap SAM3D Body Features",
     "ZMocapHaMeRHandFeatures": "zmocap HaMeR Hand Features",
     "ZMocapExMR": "zmocap ExMR Solve",
+    "ZMocapFootContact": "zmocap Foot Contact",
+    "ZMocapContactLoad": "zmocap Contact Load",
     "ZMocapSMPLPreviewer": "zmocap SMPL Previewer",
     "ZMocapVRMPreviewer": "zmocap VRM Previewer",
     "ZMocapSMPL2SOMA": "zmocap SMPL2SOMA",

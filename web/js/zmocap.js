@@ -51,7 +51,7 @@ app.registerExtension({
       node.__zmocapViewer = viewer;
       const { hint } = addPreviewWidget(node, viewer, container, isCharacter
         ? "选择或上传 VRM 即预览"
-        : "运行后在此播放动作（skinned 开关即时切换显示层）");
+        : "运行后播放：skinned 开 = 蒙皮网格，关 = 骨骼图层");
 
       if (isCharacter) {
         const combo = node.widgets?.find((w) => w.name === "character");

@@ -163,9 +163,13 @@ def write_smpl_glb(motion: dict, out_path: Path, sticks: bool = True) -> tuple[P
         "JOINTS_0": _add_accessor(appender, joints_attr, 5123, "VEC4"),
         "WEIGHTS_0": appender.add_floats(weights_attr, "VEC4"),
     }
-    if model.uv is not None:
+    # SMPL-X 的 vt 是独立 UV 布局（11313 条），和顶点数（10475）不一致；
+    # 直接当 VEC2 塞进逐顶点 primitive 会让 accessor count 不匹配（glTF 非法，
+    # three.js 可能拒绝/错位）。材质没有贴图，不写 UV 即可。
+    if model.uv is not None and model.uv.shape[0] == vertices.shape[0]:
         attributes["TEXCOORD_0"] = appender.add_floats(model.uv.astype(np.float32), "VEC2")
-    index_accessor = _add_accessor(appender, model.faces.astype(np.uint32), 5125, "SCALAR")
+    # faces 是 (F,3)；索引是 SCALAR，必须按 F*3 写，不能按 F 写。
+    index_accessor = _add_accessor(appender, model.faces.astype(np.uint32).reshape(-1), 5125, "SCALAR")
     doc["materials"] = [{
         "name": "zmocap_skin",
         "pbrMetallicRoughness": {"baseColorFactor": [0.85, 0.72, 0.62, 1.0],
