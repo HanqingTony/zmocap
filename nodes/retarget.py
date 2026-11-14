@@ -299,27 +299,51 @@ def _mat_from_quat(q) -> np.ndarray:
 
 
 def _quat_from_mat(m: np.ndarray) -> np.ndarray:
-    """旋转矩阵 (..., 3, 3) → 四元数 (..., 4)，顺序 (x, y, z, w)。"""
+    """旋转矩阵 (..., 3, 3) → 四元数 (..., 4)，顺序 (x, y, z, w)。
+
+    用 Shoemake 的四分支公式：按迹与三个对角元素择一为最稳定的分支。
+    （早先的实现只覆盖了 "迹>0 且 m00 最大" 的部分组合，其余情况会静默返回单位四元数。）
+    """
     m = np.asarray(m, dtype=np.float64)
-    trace = m[..., 0, 0] + m[..., 1, 1] + m[..., 2, 2]
-    q = np.empty(m.shape[:-2] + (4,), dtype=np.float64)
-    positive = trace > 0
-    s = np.sqrt(np.where(positive, trace + 1.0, 1.0)) * 2.0
-    q[..., 3] = np.where(positive, 0.25 * s, 0.0)
-    q[..., 0] = np.where(positive, (m[..., 2, 1] - m[..., 1, 2]) / s, 0.0)
-    q[..., 1] = np.where(positive, (m[..., 0, 2] - m[..., 2, 0]) / s, 0.0)
-    q[..., 2] = np.where(positive, (m[..., 1, 0] - m[..., 0, 1]) / s, 0.0)
-    for condition, (i, j, k) in (
-        (~positive & (m[..., 0, 0] > m[..., 1, 1]) & (m[..., 0, 0] > m[..., 2, 2]), (0, 1, 2)),
-        (~positive & ~(m[..., 0, 0] > m[..., 1, 1]) & (m[..., 1, 1] > m[..., 2, 2]), (1, 2, 0)),
-        (~positive & ~(m[..., 0, 0] > m[..., 1, 1]) & ~(m[..., 1, 1] > m[..., 2, 2]), (2, 0, 1)),
-    ):
-        s2 = np.sqrt(np.where(condition, 1.0 + m[..., i, i] - m[..., j, j] - m[..., k, k], 1.0)) * 2.0
-        q[..., i] = np.where(condition, 0.25 * s2, q[..., i])
-        q[..., j] = np.where(condition, (m[..., j, i] + m[..., i, j]) / s2, q[..., j])
-        q[..., k] = np.where(condition, (m[..., k, i] + m[..., i, k]) / s2, q[..., k])
-        q[..., 3] = np.where(condition, (m[..., k, j] - m[..., j, k]) / s2, q[..., 3])
-    return q
+    m00, m11, m22 = m[..., 0, 0], m[..., 1, 1], m[..., 2, 2]
+    trace = m00 + m11 + m22
+    q = np.zeros(m.shape[:-2] + (4,), dtype=np.float64)
+    w = np.zeros_like(trace)
+
+    # 分支 A：迹最大
+    use_trace = trace > 0.0
+    s = np.sqrt(np.where(use_trace, trace + 1.0, 1.0)) * 2.0
+    q[..., 0] = np.where(use_trace, (m[..., 2, 1] - m[..., 1, 2]) / s, 0.0)
+    q[..., 1] = np.where(use_trace, (m[..., 0, 2] - m[..., 2, 0]) / s, 0.0)
+    q[..., 2] = np.where(use_trace, (m[..., 1, 0] - m[..., 0, 1]) / s, 0.0)
+    w = np.where(use_trace, 0.25 * s, w)
+
+    # 分支 B/C/D：对角最大
+    use_x = ~use_trace & (m00 >= m11) & (m00 >= m22)
+    use_y = ~use_trace & ~use_x & (m11 >= m22)
+    use_z = ~use_trace & ~use_x & ~use_y
+
+    sx = np.sqrt(np.where(use_x, 1.0 + m00 - m11 - m22, 1.0)) * 2.0
+    q[..., 0] = np.where(use_x, 0.25 * sx, q[..., 0])
+    q[..., 1] = np.where(use_x, (m[..., 0, 1] + m[..., 1, 0]) / sx, q[..., 1])
+    q[..., 2] = np.where(use_x, (m[..., 0, 2] + m[..., 2, 0]) / sx, q[..., 2])
+    w = np.where(use_x, (m[..., 2, 1] - m[..., 1, 2]) / sx, w)
+
+    sy = np.sqrt(np.where(use_y, 1.0 + m11 - m00 - m22, 1.0)) * 2.0
+    q[..., 1] = np.where(use_y, 0.25 * sy, q[..., 1])
+    q[..., 0] = np.where(use_y, (m[..., 0, 1] + m[..., 1, 0]) / sy, q[..., 0])
+    q[..., 2] = np.where(use_y, (m[..., 1, 2] + m[..., 2, 1]) / sy, q[..., 2])
+    w = np.where(use_y, (m[..., 0, 2] - m[..., 2, 0]) / sy, w)
+
+    sz = np.sqrt(np.where(use_z, 1.0 + m22 - m00 - m11, 1.0)) * 2.0
+    q[..., 2] = np.where(use_z, 0.25 * sz, q[..., 2])
+    q[..., 0] = np.where(use_z, (m[..., 0, 2] + m[..., 2, 0]) / sz, q[..., 0])
+    q[..., 1] = np.where(use_z, (m[..., 1, 2] + m[..., 2, 1]) / sz, q[..., 1])
+    w = np.where(use_z, (m[..., 1, 0] - m[..., 0, 1]) / sz, w)
+
+    q[..., 3] = w
+    norm = np.linalg.norm(q, axis=-1, keepdims=True)
+    return np.divide(q, np.where(norm < 1e-12, 1.0, norm))
 
 
 def _world_deltas(quats: np.ndarray) -> dict:
