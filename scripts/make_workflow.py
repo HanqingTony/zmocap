@@ -55,7 +55,7 @@ class Builder:
                 "extra": {}, "version": 0.4}
 
 
-def build(video: str = "zmocap_test.mp4") -> dict:
+def build(video: str = "zmocap_test.mp4", with_vrm: bool = False) -> dict:
     b = Builder()
 
     load = b.node("LoadVideo", (40, 80), (320, 100), [video],
@@ -127,12 +127,59 @@ def build(video: str = "zmocap_test.mp4") -> dict:
     b.link(contact, 0, export, 0, "ZMOCAP_SMPLX")
     b.link(contact, 1, export, 1, "ZMOCAP_CONTACTS")
 
+    if with_vrm:
+        # 完整 VRM 分支：SMPL-X → SOMA → VRM 骨架 → 标定 → 绑定 → 预览
+        loader = b.node("ZMocapVRMLoader", (2280, 720), (320, 120), [_default_character()],
+                        outputs=[("character", "ZMOCAP_CHARACTER")])
+        smpl2soma = b.node("ZMocapSMPL2SOMA", (2680, 720), (300, 60),
+                           inputs=[("motion", "ZMOCAP_SMPLX")],
+                           outputs=[("motion", "ZMOCAP_SOMA")])
+        b.link(contact, 0, smpl2soma, 0, "ZMOCAP_SMPLX")
+        soma2vrm = b.node("ZMocapSOMA2VRM", (2680, 860), (300, 60),
+                          inputs=[("motion", "ZMOCAP_SOMA")],
+                          outputs=[("motion", "ZMOCAP_VRM")])
+        b.link(smpl2soma, 0, soma2vrm, 0, "ZMOCAP_SOMA")
+        calibrate = b.node("ZMocapCalibrate", (3060, 720), (300, 100),
+                           inputs=[("character", "ZMOCAP_CHARACTER")],
+                           outputs=[("calibration", "ZMOCAP_CALIBRATION"), ("report", "STRING")])
+        b.link(loader, 0, calibrate, 0, "ZMOCAP_CHARACTER")
+        bind = b.node("ZMocapBind", (3440, 720), (320, 120), ["zmocap_bound", True],
+                      inputs=[("motion", "ZMOCAP_VRM"), ("calibration", "ZMOCAP_CALIBRATION")],
+                      outputs=[("glb", "ZMOCAP_GLB"), ("report", "STRING")])
+        b.link(soma2vrm, 0, bind, 0, "ZMOCAP_VRM")
+        b.link(calibrate, 0, bind, 1, "ZMOCAP_CALIBRATION")
+        vprev = b.node("ZMocapVRMPreviewer", (3820, 720), (340, 140), ["zmocap_vrm", True],
+                       inputs=[("motion", "ZMOCAP_VRM"), ("character", "ZMOCAP_CHARACTER"),
+                               ("binding", "ZMOCAP_GLB")],
+                       outputs=[("glb_path", "STRING")])
+        b.link(soma2vrm, 0, vprev, 0, "ZMOCAP_VRM")
+        b.link(loader, 0, vprev, 1, "ZMOCAP_CHARACTER")
+        b.link(bind, 0, vprev, 2, "ZMOCAP_GLB")
+
     return b.dump()
 
 
+def _default_character() -> str:
+    """挑一个已上传/已下载的角色作为默认值，找不到就用内置骨架。"""
+    try:
+        import folder_paths
+
+        for root in (Path(folder_paths.models_dir) / "zmocap" / "characters",
+                     Path(folder_paths.get_input_directory())):
+            if root.is_dir():
+                for path in sorted(root.iterdir()):
+                    if path.suffix.lower() in {".vrm", ".glb", ".gltf"}:
+                        return path.name
+    except Exception:
+        pass
+    return "(none / built-in skeleton)"
+
+
 if __name__ == "__main__":
-    out = Path(sys.argv[1] if len(sys.argv) > 1 else "zmocap-exmr.json").expanduser()
-    video = sys.argv[2] if len(sys.argv) > 2 else "zmocap_test.mp4"
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    with_vrm = "--vrm" in sys.argv
+    out = Path(args[0] if args else "zmocap-exmr.json").expanduser()
+    video = args[1] if len(args) > 1 else "zmocap_test.mp4"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(build(video), ensure_ascii=False, indent=1), encoding="utf-8")
+    out.write_text(json.dumps(build(video, with_vrm), ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"写入 {out}")

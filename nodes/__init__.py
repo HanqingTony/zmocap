@@ -17,6 +17,7 @@ from .character import ZMocapVRMLoader
 from .exmr import ZMocapExMR
 from .foot_contact import ZMocapContactLoad, ZMocapFootContact
 from .export import ZMocapExport
+from .calibrate import ZMocapBind, ZMocapCalibrate
 from .format_soma import ZMocapSMPL2SOMA, ZMocapSOMA2VRM
 from .frames_node import ZMocapFrames, ZMocapIntrinsics
 from .hands import ZMocapHaMeRHandFeatures
@@ -42,6 +43,8 @@ NODE_CLASS_MAPPINGS = {
     "ZMocapContactLoad": ZMocapContactLoad,
     "ZMocapSMPLPreviewer": ZMocapSMPLPreviewer,
     "ZMocapVRMPreviewer": ZMocapVRMPreviewer,
+    "ZMocapCalibrate": ZMocapCalibrate,
+    "ZMocapBind": ZMocapBind,
     "ZMocapSMPL2SOMA": ZMocapSMPL2SOMA,
     "ZMocapSOMA2VRM": ZMocapSOMA2VRM,
     "ZMocapVRMLoader": ZMocapVRMLoader,
@@ -64,6 +67,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ZMocapContactLoad": "zmocap Contact Load",
     "ZMocapSMPLPreviewer": "zmocap SMPL Previewer",
     "ZMocapVRMPreviewer": "zmocap VRM Previewer",
+    "ZMocapCalibrate": "zmocap Calibrate",
+    "ZMocapBind": "zmocap Bind",
     "ZMocapSMPL2SOMA": "zmocap SMPL2SOMA",
     "ZMocapSOMA2VRM": "zmocap SOMA2VRM",
     "ZMocapVRMLoader": "zmocap VRM Loader",

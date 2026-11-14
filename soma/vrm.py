@@ -182,12 +182,12 @@ def _axis_angle(axis, angle):
     ])
 
 
-def retarget_to_rig(motion, character: str | Path) -> dict:
-    """SOMA 运动 + 角色 → 每根骨头的世界旋转（角色骨架空间）。
+def calibrate(motion, character: str | Path) -> dict:
+    """标定：源运动 + 角色 → 一次性的对齐参数（不改动源，也不改角色文件）。
 
-    映射与"哪些骨段用方向对齐、哪些只跟相对变化"沿用 MotionBridge 的 `_pairs` 策略；
-    空间换算交给这里自己算：两个基底都含镜像（left/forward/up 的 det = -1），
-    所以 `to_rig = rig_basis @ soma_basis.T` 恰好是正常旋转。
+    产出：坐标基底换算 ``to_rig``、朝向修正 ``yaw``、骨长比 ``scale``、
+    以及 MotionBridge 的骨骼配对 ``pairs``。把标定与求解拆开之后，
+    同一段动作可以配不同角色、同一个角色也可以复用同一份标定。
     """
     _, retarget_module = _bridge()
     _pairs = retarget_module._pairs
@@ -203,59 +203,25 @@ def retarget_to_rig(motion, character: str | Path) -> dict:
     soma_basis = np.column_stack([SOMA_LEFT, SOMA_FORWARD, SOMA_UP])
     to_rig = rig_basis @ soma_basis.T
 
-    # 源视频里的人在世界里朝哪，就把整段动作绕竖直轴转成"角色自己的正面朝向"，
-    # 这样角色开场是面向镜头的（和视频里一致），而不是永远背对镜头。
-    up_axis = np.asarray(mapping.up, dtype=np.float64)
-    up_axis = _unit(up_axis)
-    # 朝向用"骨架几何"推：左髋 - 右髋 = 人物左手方向，与竖直轴叉乘得到正面
+    up_axis = _unit(np.asarray(mapping.up, dtype=np.float64))
     hips_0 = np.asarray(motion.positions[0], dtype=np.float64)
     left_0 = to_rig @ (hips_0[motion.index("LeftLeg")] - hips_0[motion.index("RightLeg")])
     source_front = np.cross(_unit(left_0), up_axis)
-    source_front = np.asarray(source_front, dtype=np.float64) - up_axis * np.dot(source_front, up_axis)
-    target_front = np.asarray(mapping.forward, dtype=np.float64) - up_axis * np.dot(mapping.forward, up_axis)
+    source_front = source_front - up_axis * float(source_front @ up_axis)
+    target_front = np.asarray(mapping.forward, dtype=np.float64) - up_axis * float(mapping.forward @ up_axis)
     if np.linalg.norm(source_front) > 1e-6 and np.linalg.norm(target_front) > 1e-6:
-        a = _unit(source_front)
-        b = _unit(target_front)
+        a, b = _unit(source_front), _unit(target_front)
         axis = np.cross(a, b)
         angle = float(np.arctan2(np.linalg.norm(axis), float(np.clip(a @ b, -1.0, 1.0))))
         yaw = _axis_angle(_unit(axis), angle) if np.linalg.norm(axis) > 1e-9 else np.eye(3)
     else:
+        angle = 0.0
         yaw = np.eye(3)
 
-    bones = {b["name"]: b for b in dump["bones"]}
     rig_head = {b["name"]: np.asarray(b["head"], dtype=np.float64) for b in dump["bones"]}
     soma_rest = np.asarray(motion.rest[:, :3, 3], dtype=np.float64)
     soma_head = {name: soma_rest[i] for i, name in enumerate(motion.names)}
-
     pairs = _pairs(mapping.roles, rig_head, soma_head)
-    soma_rot = np.asarray(motion.world[:, :, :3, :3], dtype=np.float64)
-    frames = motion.frames
-
-    soma_anim = np.asarray(motion.positions, dtype=np.float64)
-    world_rotation = {}
-    for bone, joint, child, _following, aligned in pairs:
-        if bone not in bones or joint not in soma_head:
-            continue
-        rest = np.asarray(bones[bone]["rest"], dtype=np.float64)[:3, :3]
-        if child in soma_head:
-            # 四肢：直接用"源里这根骨头每帧指向哪里"构造世界朝向（方向驱动），
-            # 这样 T-pose/A-pose、骨长差异、roll 差异都不会把骨链拧反。
-            j = motion.index(joint)
-            c = motion.index(child)
-            directions = (soma_anim[:, c] - soma_anim[:, j]) @ to_rig.T @ yaw.T
-            directions = np.stack([_unit(d) for d in directions])
-            ref = np.asarray(rest[:, 2], dtype=np.float64)
-            ref = np.tile(ref, (len(directions), 1))
-            zaxis = ref - directions * np.sum(ref * directions, axis=1, keepdims=True)
-            bad = np.linalg.norm(zaxis, axis=1) < 1e-6
-            if np.any(bad):
-                zaxis[bad] = np.cross(directions[bad], np.array([1.0, 0.0, 0.0]))
-            zaxis = np.stack([_unit(z) for z in zaxis])
-            xaxis = np.cross(directions, zaxis)
-            world_rotation[bone] = np.stack([xaxis, directions, zaxis], axis=2)
-        else:
-            delta = yaw @ to_rig @ soma_rot[:, motion.index(joint)] @ to_rig.T @ yaw.T
-            world_rotation[bone] = delta @ rest
 
     def leg_length(points):
         return float(np.mean([
@@ -268,20 +234,74 @@ def retarget_to_rig(motion, character: str | Path) -> dict:
     except KeyError:
         scale = 1.0
 
-    soma_positions = np.asarray(motion.positions, dtype=np.float64)
-    hips = (soma_positions[:, motion.index("Hips")] - soma_positions[0, motion.index("Hips")]) @ to_rig.T @ yaw.T * scale
-
     return {
         "dump": dump,
-        "rigmap": mapping,
+        "mapping": mapping,
+        "to_rig": to_rig,
+        "yaw": yaw,
+        "yaw_deg": float(np.degrees(angle)),
+        "scale": scale,
+        "pairs": pairs,
+        "bones": {b["name"]: b for b in dump["bones"]},
+        "rig_head": rig_head,
+        "soma_head": soma_head,
+        "character": str(character),
+    }
+
+
+def apply_calibration(motion, calibration: dict) -> dict:
+    """用标定结果求解每根骨头的世界旋转与髋部位移（纯计算，不碰文件）。"""
+    to_rig = np.asarray(calibration["to_rig"], dtype=np.float64)
+    yaw = np.asarray(calibration["yaw"], dtype=np.float64)
+    scale = float(calibration["scale"])
+    bones = calibration["bones"]
+    soma_head = calibration["soma_head"]
+    soma_rot = np.asarray(motion.world[:, :, :3, :3], dtype=np.float64)
+    soma_anim = np.asarray(motion.positions, dtype=np.float64)
+
+    world_rotation = {}
+    for bone, joint, child, _following, _aligned in calibration["pairs"]:
+        if bone not in bones or joint not in soma_head:
+            continue
+        rest = np.asarray(bones[bone]["rest"], dtype=np.float64)[:3, :3]
+        if child in soma_head:
+            j = motion.index(joint)
+            c = motion.index(child)
+            directions = (soma_anim[:, c] - soma_anim[:, j]) @ to_rig.T @ yaw.T
+            directions = np.stack([_unit(d) for d in directions])
+            ref = np.tile(np.asarray(rest[:, 2], dtype=np.float64), (len(directions), 1))
+            zaxis = ref - directions * np.sum(ref * directions, axis=1, keepdims=True)
+            bad = np.linalg.norm(zaxis, axis=1) < 1e-6
+            if np.any(bad):
+                zaxis[bad] = np.cross(directions[bad], np.array([1.0, 0.0, 0.0]))
+            zaxis = np.stack([_unit(z) for z in zaxis])
+            xaxis = np.cross(directions, zaxis)
+            world_rotation[bone] = np.stack([xaxis, directions, zaxis], axis=2)
+        else:
+            delta = yaw @ to_rig @ soma_rot[:, motion.index(joint)] @ to_rig.T @ yaw.T
+            world_rotation[bone] = delta @ rest
+
+    hips_index = motion.index("Hips")
+    hips = (soma_anim[:, hips_index] - soma_anim[0, hips_index]) @ to_rig.T @ yaw.T * scale
+    return {
         "world_rotation": world_rotation,
         "hips_offset": hips,
-        "frames": frames,
+        "frames": motion.frames,
         "fps": motion.fps,
         "scale": scale,
-        "to_rig": to_rig,
-        "pairs": len(pairs),
+        "pairs": len(calibration["pairs"]),
+        "yaw_deg": float(calibration.get("yaw_deg", 0.0)),
     }
+
+
+def retarget_to_rig(motion, character: str | Path) -> dict:
+    """一次性完成标定 + 求解（保留旧接口，等价于 calibrate → apply_calibration）。"""
+    calibration = calibrate(motion, character)
+    result = apply_calibration(motion, calibration)
+    result["dump"] = calibration["dump"]
+    result["rigmap"] = calibration["mapping"]
+    result["to_rig"] = calibration["to_rig"]
+    return result
 
 
 def write_animation(character: str | Path, out_path: str | Path, retargeted: dict, fps: float,

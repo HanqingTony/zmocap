@@ -78,15 +78,18 @@ def _leg_length(heads: dict) -> float:
     return float(np.mean(values)) if values else 1.0
 
 
-def bind(vrm_motion: dict, character: str) -> dict:
-    """把 humanoid 运动绑到角色骨架上，返回可直接写 GLB 的结构。"""
+def calibrate(character: str) -> dict:
+    """标定：角色 → 静态对齐参数（不与具体动作相关，可复用）。
+
+    对每根被识别的 bone 记下 ``transfer = B_can[i]ᵀ · B_char``，并算出骨长比例
+    ``scale``。动作进来后只需 ``W_char(t) = A(t) · transfer``，标定本身不需要重算。
+    """
     dump = build_dump(character)
     rest_canonical = humanoid.rest_matrices()
     index_canonical = {name: i for i, name in enumerate(humanoid.NAMES)}
-    animation = np.asarray(vrm_motion["world_rotation"], dtype=np.float64)
 
-    world_rotation = {}
-    matched_humanoid = set()
+    pairs = []
+    matched: set[str] = set()
     bone_head: dict[str, np.ndarray] = {}
     for bone in dump["bones"]:
         bone_head[bone["name"]] = np.asarray(bone["head"], dtype=np.float64)
@@ -96,30 +99,30 @@ def bind(vrm_motion: dict, character: str) -> dict:
         i = index_canonical[role]
         rest_char = np.asarray(bone["rest"], dtype=np.float64)[:3, :3]
         transfer = rest_canonical[i][:3, :3].T @ rest_char
-        world_rotation[bone["name"]] = animation[:, i] @ transfer
-        matched_humanoid.add(role)
+        pairs.append({"bone": bone["name"], "role": role, "index": i, "transfer": transfer})
+        matched.add(role)
 
-    if not world_rotation:
+    if not pairs:
         raise ValueError(f"角色 {character} 里没有识别到任何 humanoid 骨骼")
 
     matched_heads = {name: head for name, head in bone_head.items() if humanoid_of(name)}
     canonical_heads = {humanoid.NAMES[i]: humanoid.POSITIONS[i] for i in range(len(humanoid.NAMES))}
-    scale = _leg_length(matched_heads) / _leg_length(canonical_heads)
-    transl = np.asarray(vrm_motion["transl"], dtype=np.float64) * scale
+    try:
+        scale = _leg_length(matched_heads) / _leg_length(canonical_heads)
+    except Exception:
+        scale = 1.0
 
-    hips_bone = next((name for name in matched_heads if humanoid_of(name) == "hips"), None)
-    rigmap = types.SimpleNamespace(roles={"Hips": hips_bone})
-    missing = [name for name in humanoid.NAMES if name not in matched_humanoid]
+    missing = [name for name in humanoid.NAMES if name not in matched]
+    hips_bone = next((p["bone"] for p in pairs if p["role"] == "hips"), None)
     return {
+        "character": str(character),
         "dump": dump,
-        "world_rotation": world_rotation,
-        "hips_offset": transl,
-        "frames": int(vrm_motion["frames"]),
-        "fps": float(vrm_motion["fps"]),
-        "scale": scale,
-        "rigmap": rigmap,
+        "pairs": pairs,
+        "scale": float(scale),
+        "missing": missing,
+        "hips_bone": hips_bone,
         "report": {
-            "bones": len(world_rotation),
+            "bones": len(pairs),
             "scale": round(float(scale), 4),
             "unmapped": missing[:12],
             "unmapped_count": len(missing),
@@ -127,14 +130,46 @@ def bind(vrm_motion: dict, character: str) -> dict:
     }
 
 
-def write_character_glb(vrm_motion: dict, character: str, out_path, fps: float | None = None,
-                        sticks: bool = True):
-    """绑定并写出带动画的 GLB；返回 (路径, 绑定报告)。"""
-    retargeted = bind(vrm_motion, character)
+def apply_calibration(vrm_motion: dict, calibration: dict) -> dict:
+    """把动作套到标定好的角色上（纯计算）。"""
+    animation = np.asarray(vrm_motion["world_rotation"], dtype=np.float64)
+    scale = float(calibration["scale"])
+    world_rotation = {
+        pair["bone"]: animation[:, pair["index"]] @ pair["transfer"]
+        for pair in calibration["pairs"]
+    }
+    transl = np.asarray(vrm_motion["transl"], dtype=np.float64) * scale
+    return {
+        "dump": calibration["dump"],
+        "world_rotation": world_rotation,
+        "hips_offset": transl,
+        "frames": int(vrm_motion["frames"]),
+        "fps": float(vrm_motion["fps"]),
+        "scale": scale,
+        "rigmap": types.SimpleNamespace(roles={"Hips": calibration.get("hips_bone")}),
+        "report": calibration["report"],
+    }
+
+
+def bind(vrm_motion: dict, character: str) -> dict:
+    """标定 + 求解（保留旧接口）。"""
+    return apply_calibration(vrm_motion, calibrate(character))
+
+
+def write_bound_glb(retargeted: dict, character: str, out_path, fps: float | None = None,
+                    sticks: bool = True):
+    """把已求解的结果写成 GLB。"""
     if "dump" not in retargeted or "world_rotation" not in retargeted:
         raise RuntimeError("绑定结果缺少写 GLB 需要的数据")
-    path = write_animation(character, out_path, retargeted, fps or vrm_motion["fps"], sticks=sticks)
+    path = write_animation(character, out_path, retargeted, fps or retargeted["fps"], sticks=sticks)
     return path, retargeted["report"]
+
+
+def write_character_glb(vrm_motion: dict, character: str, out_path, fps: float | None = None,
+                        sticks: bool = True):
+    """绑定并写出带动画的 GLB（标定 + 求解 + 写文件，旧接口）。"""
+    retargeted = bind(vrm_motion, character)
+    return write_bound_glb(retargeted, character, out_path, fps, sticks)
 
 
 def write_humanoid_glb(vrm_motion: dict, out_path) -> tuple[object, dict]:

@@ -62,6 +62,7 @@ class ZMocapSMPLPreviewer:
             },
             "optional": {
                 "character": ("ZMOCAP_CHARACTER",),
+                "binding": ("ZMOCAP_GLB",),
                 "skinned": ("BOOLEAN", {"default": True}),
                 "contacts": ("ZMOCAP_CONTACTS",),
             },
@@ -143,7 +144,7 @@ class ZMocapVRMPreviewer:
     CATEGORY = "zmocap"
     DESCRIPTION = "预览 humanoid 运动：绑角色出蒙皮 + 骨骼小棍，切换即时，不重跑。"
 
-    def run(self, motion, filename, character=None, skinned=True, contacts=None):
+    def run(self, motion, filename, character=None, skinned=True, contacts=None, binding=None):
         from ..soma.binding import write_character_glb, write_humanoid_glb
 
         try:
@@ -155,6 +156,17 @@ class ZMocapVRMPreviewer:
         from ..motion import validate_clip
 
         validate_clip(motion, "vrm")
+        if isinstance(binding, dict) and binding.get("relative"):
+            # 已经由 zmocap Bind 绑定过：预览器只负责显示，不再重复绑定
+            payload = payload if payload else None
+            print(f"[zmocap] VRM preview（复用绑定产物）{binding['relative']}")
+            return {
+                "ui": {"zmocap_glb": [binding["relative"]],
+                       "zmocap_layer": ["skinned" if skinned else "bones"],
+                       "zmocap_contact": [payload] if payload else [],
+                       "zmocap_rig": [dict(binding.get("report") or {})]},
+                "result": (binding["relative"],),
+            }
         target = _character_path(character)
         animation = np.asarray(motion["world_rotation"])
         digest = _digest([
