@@ -1,4 +1,4 @@
-# 脚接触数据（zmocap.contact.v1）
+# 脚接触数据（zmocap.contact.v2）
 
 第一版：**自动检测 + 文件输出**。不做 ComfyUI 内时间轴；需要手改时编辑 JSON，
 再用 `ZMocapContactLoad` 读回来。
@@ -34,7 +34,7 @@ ZMocapExMR.motion
 
 ```json
 {
-  "format": "zmocap.contact.v1",
+  "format": "zmocap.contact.v2",
   "fps": 24.0,
   "frames": 124,
   "space": { "frame": "world", "up": "Y", "unit": "m" },
@@ -118,3 +118,23 @@ ZMocapExMR.motion
 - 修正动作沿用 ExMR 内置的 static-joint 修正；没有额外做脚锁 IK。
   如果后面要做“按 contact ranges 的强制脚锁”，再加 `Foot Lock` 节点消费 `ranges`。
 - 没有引擎适配器；Unreal/Unity/Blender 的 Notify/Marker 转换以后按需加。
+
+## v2：多通道
+
+`channels` 决定 `arrays.contact` 的列顺序，每个通道都能在节点上单独开关：
+
+| 通道 | 判定部位 | 默认 | 颜色 | 置信度来源 |
+|---|---|---|---|---|
+| `foot_left` / `foot_right` | 脚 | 开 | 蓝 `#3b82f6` / 红 `#ef4444` | ExMR `static_conf_logits` |
+| `hand_left` / `hand_right` | 腕 + 五指 | 关 | 绿 `#22c55e` / 橙 `#f59e0b` | 几何 |
+| `knee_left` / `knee_right` | 髋+膝 | 关 | 紫 `#a855f7` / 粉 `#ec4899` | 几何 |
+| `pelvis` | 骨盆 | 关 | 黄 `#eab308` | 几何 |
+| `head` | 颈/头/下颌/眼 | 关 | 白 `#e5e7eb` | 几何 |
+
+几何判定 = 「该通道最低顶点离**当帧全身最低点**的距离 ≤ `height_tolerance`」
+且水平速度 < `speed_limit` 且垂直速度 < `vertical_limit`；
+脚的置信度换成 `sigmoid(static_conf_logits) ≥ static_conf`。
+判定后统一做 `min_frames` / `gap_frames` 区间形态学。
+
+场景里永远只有一个水平地面：`floor.height` 取全场最低点，`arrays.height` 是
+**相对当帧地面**的高度（所以 0 表示贴地），`arrays.level` 是逐帧地面高度。

@@ -43,27 +43,38 @@ export function createViewer(container) {
   contactGroup.name = "zmocap_contact_rings";
   scene.add(contactGroup);
 
-  const CONTACT_COLORS = { left: 0x3b82f6, right: 0xef4444 };
+  /** 触地光圈：每个通道一个环，按帧开关；颜色由后端 channels[*].color 决定。 */
+  const contactRings = new Map();
 
-  /** 触地光圈：平铺在地面上，按帧开关，蓝=左、红=右。 */
-  function makeRing(side) {
+  function ringFor(name, color) {
+    let mesh = contactRings.get(name);
+    if (mesh) return mesh;
     const geometry = new THREE.RingGeometry(0.09, 0.135, 40);
     const material = new THREE.MeshBasicMaterial({
-      color: CONTACT_COLORS[side],
+      color: new THREE.Color(color || "#ffffff"),
       transparent: true,
       opacity: 0.9,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.name = `zmocap_contact_${side}`;
+    mesh = new THREE.Mesh(geometry, material);
+    mesh.name = `zmocap_contact_${name}`;
     mesh.rotation.x = -Math.PI / 2;
     mesh.visible = false;
     mesh.renderOrder = 3;
     contactGroup.add(mesh);
+    contactRings.set(name, mesh);
     return mesh;
   }
-  const rings = { left: makeRing("left"), right: makeRing("right") };
+
+  function contactChannels() {
+    if (!contact) return {};
+    if (contact.channels) return contact.channels;
+    const legacy = {};
+    if (contact.left) legacy.foot_left = { ...contact.left, color: "#3b82f6", label: "左脚" };
+    if (contact.right) legacy.foot_right = { ...contact.right, color: "#ef4444", label: "右脚" };
+    return legacy;
+  }
 
   function updateContactRings() {
     if (!contact) return;
@@ -72,34 +83,15 @@ export function createViewer(container) {
     // 动画循环播放时 elapsed 会一直涨：按片段时长取模，否则只在第一轮里“有帧可查”。
     const looped = duration > 0 ? elapsed % duration : elapsed;
     const index = Math.min(total - 1, Math.max(0, Math.floor(looped * fps)));
-    for (const side of ["left", "right"]) {
-      const data = contact[side];
-      const ring = rings[side];
+    for (const [name, data] of Object.entries(contactChannels())) {
+      const ring = ringFor(name, data?.color);
       const position = data?.pos?.[index];
       // 关键：必须看该帧的 on 标记，只有真着地才显示；否则光圈会一直挂在脚上。
       const grounded = !!data?.on?.[index];
-      const visible = contactVisible && grounded && Array.isArray(position);
-      ring.visible = visible;
-      if (visible) ring.position.set(position[0], position[1] + 0.002, position[2]);
+      ring.visible = contactVisible && grounded && Array.isArray(position);
+      if (ring.visible) ring.position.set(position[0], position[1] + 0.002, position[2]);
     }
   }
-
-  const grid = new THREE.GridHelper(6, 12, 0x445566, 0x223344);
-  grid.material.opacity = 0.5;
-  grid.material.transparent = true;
-  scene.add(grid);
-
-  let mixer = null;
-  let current = null;
-  let playing = true;
-  let disposed = false;
-  let frames = [];
-  let elapsed = 0;
-  let duration = 0;
-  let contact = null;
-  let contactVisible = true;
-
-  const clock = new THREE.Clock();
 
   function resize() {
     const width = container.clientWidth || 0;
@@ -286,8 +278,7 @@ export function createViewer(container) {
     setContacts(payload) {
       contact = payload || null;
       if (!contact) {
-        rings.left.visible = false;
-        rings.right.visible = false;
+        for (const mesh of contactRings.values()) mesh.visible = false;
       }
       updateContactRings();
       return !!contact;
@@ -306,10 +297,11 @@ export function createViewer(container) {
     dispose() {
       disposed = true;
       clear();
-      for (const side of ["left", "right"]) {
-        rings[side].geometry.dispose();
-        rings[side].material.dispose();
+      for (const mesh of contactRings.values()) {
+        mesh.geometry.dispose();
+        mesh.material.dispose();
       }
+      contactRings.clear();
       scene.remove(contactGroup);
       controls.dispose();
       renderer.dispose();
