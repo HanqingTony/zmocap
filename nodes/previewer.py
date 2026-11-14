@@ -34,9 +34,9 @@ def _digest(parts: list[str]) -> str:
     return hashlib.sha1("|".join(parts).encode()).hexdigest()[:8]
 
 
-def _contact_payload(contacts, motion, show=True):
-    """触地输入 → 前端光圈数据（协议不符时给出可读错误；开关关闭时不产出）。"""
-    if contacts is None or not show:
+def _contact_payload(contacts, motion):
+    """触地输入 → 前端光圈数据（协议不符时给出可读错误）。"""
+    if contacts is None:
         return None
     from .foot_contact import ring_payload
 
@@ -63,8 +63,6 @@ class ZMocapSMPLPreviewer:
             "optional": {
                 "character": ("ZMOCAP_CHARACTER",),
                 "skinned": ("BOOLEAN", {"default": True}),
-                "show_contacts": ("BOOLEAN", {"default": True, "label_on": "显示触地光圈",
-                                              "label_off": "隐藏触地光圈"}),
                 "contacts": ("ZMOCAP_CONTACTS",),
             },
         }
@@ -76,11 +74,11 @@ class ZMocapSMPLPreviewer:
     CATEGORY = "zmocap"
     DESCRIPTION = "预览 SMPL-X 运动：蒙皮视图与骨骼小棍视图写在同一个 GLB，切换即时。"
 
-    def run(self, motion, filename, character=None, skinned=True, show_contacts=True, contacts=None):
+    def run(self, motion, filename, character=None, skinned=True, contacts=None):
         from .retarget import build_glb
         from .smpl_mesh import write_smpl_glb
 
-        payload = _contact_payload(contacts, motion, show_contacts)
+        payload = _contact_payload(contacts, motion)
 
         skeleton = str(motion.get("skeleton") or ("smplx" if "params" in motion else "unknown"))
         if skeleton != "smplx":
@@ -134,8 +132,6 @@ class ZMocapVRMPreviewer:
             "optional": {
                 "character": ("ZMOCAP_CHARACTER",),
                 "skinned": ("BOOLEAN", {"default": True}),
-                "show_contacts": ("BOOLEAN", {"default": True, "label_on": "显示触地光圈",
-                                              "label_off": "隐藏触地光圈"}),
                 "contacts": ("ZMOCAP_CONTACTS",),
             },
         }
@@ -147,11 +143,11 @@ class ZMocapVRMPreviewer:
     CATEGORY = "zmocap"
     DESCRIPTION = "预览 humanoid 运动：绑角色出蒙皮 + 骨骼小棍，切换即时，不重跑。"
 
-    def run(self, motion, filename, character=None, skinned=True, show_contacts=True, contacts=None):
+    def run(self, motion, filename, character=None, skinned=True, contacts=None):
         from ..soma.binding import write_character_glb, write_humanoid_glb
 
         try:
-            payload = _contact_payload(contacts, motion, show_contacts)
+            payload = _contact_payload(contacts, motion)
         except ValueError as exc:
             print(f"[zmocap] 触地光圈不可用：{exc}")
             payload = None

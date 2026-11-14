@@ -76,7 +76,7 @@ export function createViewer(container) {
       const data = contact[side];
       const ring = rings[side];
       const position = data?.pos?.[index];
-      const visible = Array.isArray(position);
+      const visible = contactVisible && Array.isArray(position);
       ring.visible = visible;
       if (visible) ring.position.set(position[0], position[1] + 0.002, position[2]);
     }
@@ -95,6 +95,7 @@ export function createViewer(container) {
   let elapsed = 0;
   let duration = 0;
   let contact = null;
+  let contactVisible = true;
 
   const clock = new THREE.Clock();
 
@@ -274,6 +275,12 @@ export function createViewer(container) {
     },
 
     /** 载入触地数据（zmocap.contact.v1 的预览载荷）；null 表示清除光圈。 */
+    /** 光圈显隐（前端开关，不参与工作流序列化）。 */
+    setContactsVisible(visible) {
+      contactVisible = !!visible;
+      updateContactRings();
+    },
+
     setContacts(payload) {
       contact = payload || null;
       if (!contact) {

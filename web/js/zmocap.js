@@ -18,6 +18,23 @@ function addPreviewWidget(node, viewer, container, title) {
     "position:absolute;inset:auto 0 6px 0;text-align:center;font-size:11px;color:#8fa3b8;" +
     "pointer-events:none;user-select:none";
   container.appendChild(hint);
+  // 触地光圈开关：放在预览容器里（DOM），不参与 widgets_values，避免与后端 widget 顺序错位。
+  const toggle = document.createElement("label");
+  toggle.title = "显示 / 隐藏触地光圈（蓝=左 红=右）";
+  toggle.style.cssText =
+    "position:absolute;top:6px;left:6px;display:flex;align-items:center;gap:4px;" +
+    "font-size:11px;color:#cbd6e2;background:rgba(16,20,26,.7);padding:3px 7px;" +
+    "border-radius:5px;cursor:pointer;user-select:none;z-index:2";
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.checked = true;
+  box.style.cssText = "margin:0;cursor:pointer;accent-color:#4a9eff";
+  box.addEventListener("change", () => viewer.setContactsVisible(box.checked));
+  toggle.appendChild(box);
+  toggle.appendChild(document.createTextNode("触地光圈"));
+  container.appendChild(toggle);
+  node.__zmocapContactToggle = box;
+
   const widget = node.addDOMWidget("zmocap_preview", "zmocap3d", container, {
     serialize: false,
     hideOnZoom: false,
