@@ -93,6 +93,23 @@ export function createViewer(container) {
     }
   }
 
+  const grid = new THREE.GridHelper(6, 12, 0x445566, 0x223344);
+  grid.material.opacity = 0.5;
+  grid.material.transparent = true;
+  scene.add(grid);
+
+  let mixer = null;
+  let current = null;
+  let playing = true;
+  let disposed = false;
+  let frames = [];
+  let elapsed = 0;
+  let duration = 0;
+  let contact = null;
+  let contactVisible = true;
+
+  const clock = new THREE.Clock();
+
   function resize() {
     const width = container.clientWidth || 0;
     const height = container.clientHeight || 0;
