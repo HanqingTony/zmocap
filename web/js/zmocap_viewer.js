@@ -76,7 +76,9 @@ export function createViewer(container) {
       const data = contact[side];
       const ring = rings[side];
       const position = data?.pos?.[index];
-      const visible = contactVisible && Array.isArray(position);
+      // 关键：必须看该帧的 on 标记，只有真着地才显示；否则光圈会一直挂在脚上。
+      const grounded = !!data?.on?.[index];
+      const visible = contactVisible && grounded && Array.isArray(position);
       ring.visible = visible;
       if (visible) ring.position.set(position[0], position[1] + 0.002, position[2]);
     }
