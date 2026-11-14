@@ -148,6 +148,55 @@ class SomaMotion:
         return path
 
 
+def _rest_frames(rest_positions: np.ndarray, parents, forward=(0.0, 0.0, -1.0)) -> np.ndarray:
+    """每个关节的规范 rest 旋转：**+Y 沿骨方向**，Z 尽量朝向 forward。
+
+    这是 MotionBridge / glTF / VRM 共同遵循的口径。之前 rest 旋转全部取单位阵，
+    等于假设"SOMA 的静止姿态就是单位朝向"，与真实骨架无关，导致 rest 方向偏差
+    154°，下游拿它的 rest 做参照时必然错位。
+    """
+    count = len(parents)
+    frames = np.tile(np.eye(3), (count, 1, 1))
+    direction = np.zeros((count, 3))
+    children: dict[int, int] = {}
+    for index, parent in enumerate(parents):
+        if parent >= 0 and parent not in children:
+            children[parent] = index
+    for index in range(count):
+        child = children.get(index)
+        if child is not None:
+            direction[index] = rest_positions[child] - rest_positions[index]
+        else:
+            direction[index] = direction[parents[index]] if parents[index] >= 0 else np.array([0.0, 1.0, 0.0])
+    norm = np.linalg.norm(direction, axis=1, keepdims=True)
+    direction = np.divide(direction, norm, out=np.tile(np.array([0.0, 1.0, 0.0]), (count, 1)), where=norm > 1e-9)
+    reference = np.array(forward, dtype=np.float64)
+    for index in range(count):
+        y = direction[index]
+        z = reference - y * float(y @ reference)
+        if np.linalg.norm(z) < 1e-6:                    # 骨方向与 forward 平行时换参考轴
+            z = np.cross(y, np.array([0.0, 1.0, 0.0]))
+            if np.linalg.norm(z) < 1e-6:
+                z = np.cross(y, np.array([1.0, 0.0, 0.0]))
+        z = z / np.linalg.norm(z)
+        x = np.cross(y, z)
+        frames[index] = np.stack([x, y, z], axis=1)
+    return frames
+
+
+def rest_report(motion) -> dict:
+    """rest 骨架自检：方向一致性、正交性、与父关节偏移是否闭合。"""
+    rest = np.asarray(motion.rest, dtype=np.float64)
+    rotations = rest[:, :3, :3]
+    positions = rest[:, :3, 3]
+    orthonormal = float(np.abs(rotations @ rotations.transpose(0, 2, 1) - np.eye(3)).max())
+    determinant = float(np.abs(np.linalg.det(rotations) - 1.0).max())
+    frames = _rest_frames(positions, motion.parents)
+    error = float(np.degrees(np.arccos(np.clip(np.sum(rotations[:, :, 1] * frames[:, :, 1], axis=1), -1.0, 1.0))).max())
+    return {"orthonormal_error": orthonormal, "determinant_error": determinant,
+            "direction_error_deg": error, "joints": int(len(positions))}
+
+
 def _soma_rest_positions(rest_joints: np.ndarray, table: dict) -> np.ndarray:
     """按来源表把 SMPL-X 模板关节坐标换算成 SOMA 的 rest 位置。"""
     out = np.zeros((len(SOMA_NAMES), 3), dtype=np.float64)
@@ -243,6 +292,7 @@ def build_soma_motion(params, fps: float = 30.0) -> SomaMotion:
     # 注意：保持 SOMA 原生 Y 轴向上；重定向侧的坐标系由 rigmap 从角色骨架自行探测。
 
     rest = np.tile(np.eye(4, dtype=np.float64), (len(SOMA_NAMES), 1, 1))
+    rest[:, :3, :3] = _rest_frames(rest_soma, SOMA_PARENTS)
     rest[:, :3, 3] = rest_soma
     world = np.tile(np.eye(4, dtype=np.float64), (frames, len(SOMA_NAMES), 1, 1))
     world[:, :, :3, :3] = soma_rot

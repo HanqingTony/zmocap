@@ -11,8 +11,17 @@ from pathlib import Path
 
 import numpy as np
 
-from ..vendor.motionbridge import rigmap as rigmap_module
-from ..vendor.motionbridge import retarget as retarget_module
+def _bridge():
+    """延迟导入 MotionBridge（vendor 缺失时给出可执行的提示，而不是插件加载失败）。"""
+    try:
+        from ..vendor.motionbridge import rigmap as rigmap_module
+        from ..vendor.motionbridge import retarget as retarget_module
+    except Exception as exc:  # pragma: no cover - 依赖外部 vendor
+        raise RuntimeError(
+            "缺少 vendor/motionbridge（Apache-2.0）。请在插件目录执行 "
+            "`python install.py --fetch-vendor` 或手动克隆 motionbridge 到 vendor/motionbridge。"
+        ) from exc
+    return rigmap_module, retarget_module
 from ..nodes.retarget import (
     _Appender,
     _mat_from_quat,
@@ -180,9 +189,11 @@ def retarget_to_rig(motion, character: str | Path) -> dict:
     空间换算交给这里自己算：两个基底都含镜像（left/forward/up 的 det = -1），
     所以 `to_rig = rig_basis @ soma_basis.T` 恰好是正常旋转。
     """
-    from ..vendor.motionbridge.retarget import _pairs
+    _, retarget_module = _bridge()
+    _pairs = retarget_module._pairs
 
     dump = build_dump(character)
+    rigmap_module, _ = _bridge()
     mapping = rigmap_module.build(dump)
     missing = mapping.missing()
     if missing:

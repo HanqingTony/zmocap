@@ -1,6 +1,9 @@
 __pycache__/
 *.py[cod]
 .venv/
-/vendor/
+/vendor/ExMR/
+/vendor/KimodoMotionCorrection/
+/__pycache__/
+vendor/__pycache__/
 /models/
 .DS_Store
