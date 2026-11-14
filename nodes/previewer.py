@@ -34,6 +34,22 @@ def _digest(parts: list[str]) -> str:
     return hashlib.sha1("|".join(parts).encode()).hexdigest()[:8]
 
 
+def _contact_payload(contacts, motion):
+    """触地输入 → 前端光圈数据（协议不符时给出可读错误）。"""
+    if contacts is None:
+        return None
+    from .foot_contact import ring_payload
+
+    payload = ring_payload(contacts, motion)
+    for warning in payload.get("warnings") or []:
+        print(f"[zmocap] 触地校验警告：{warning}")
+    on_left = sum(payload["left"]["on"])
+    on_right = sum(payload["right"]["on"])
+    print(f"[zmocap] 触地光圈：左 {on_left}/{payload['frames']} 帧，右 {on_right}/{payload['frames']} 帧，"
+          f"地面 {payload['floor']:.3f} m")
+    return payload
+
+
 class ZMocapSMPLPreviewer:
     """SMPL-X 运动的预览器（自带骨架或绑到角色）。"""
 
@@ -47,6 +63,7 @@ class ZMocapSMPLPreviewer:
             "optional": {
                 "character": ("ZMOCAP_CHARACTER",),
                 "skinned": ("BOOLEAN", {"default": True}),
+                "contacts": ("ZMOCAP_CONTACTS",),
             },
         }
 
@@ -57,9 +74,11 @@ class ZMocapSMPLPreviewer:
     CATEGORY = "zmocap"
     DESCRIPTION = "预览 SMPL-X 运动：蒙皮视图与骨骼小棍视图写在同一个 GLB，切换即时。"
 
-    def run(self, motion, filename, character=None, skinned=True):
+    def run(self, motion, filename, character=None, skinned=True, contacts=None):
         from .retarget import build_glb
         from .smpl_mesh import write_smpl_glb
+
+        payload = _contact_payload(contacts, motion)
 
         skeleton = str(motion.get("skeleton") or ("smplx" if "params" in motion else "unknown"))
         if skeleton != "smplx":
@@ -76,6 +95,7 @@ class ZMocapSMPLPreviewer:
             return {
                 "ui": {"zmocap_glb": [relative],
                        "zmocap_layer": ["skinned" if skinned else "bones"],
+                       "zmocap_contact": [payload] if payload else [],
                        "zmocap_rig": [{"path": str(path), **info}]},
                 "result": (relative,),
             }
@@ -93,6 +113,7 @@ class ZMocapSMPLPreviewer:
         print(f"[zmocap] SMPL preview {info['mode']} -> {path.name} ({info['bones']} bones)")
         return {
             "ui": {"zmocap_glb": [relative], "zmocap_layer": ["skinned" if skinned else "bones"],
+                   "zmocap_contact": [payload] if payload else [],
                    "zmocap_rig": [{"path": str(path), **info}]},
             "result": (relative,),
         }
@@ -111,6 +132,7 @@ class ZMocapVRMPreviewer:
             "optional": {
                 "character": ("ZMOCAP_CHARACTER",),
                 "skinned": ("BOOLEAN", {"default": True}),
+                "contacts": ("ZMOCAP_CONTACTS",),
             },
         }
 
@@ -121,8 +143,14 @@ class ZMocapVRMPreviewer:
     CATEGORY = "zmocap"
     DESCRIPTION = "预览 humanoid 运动：绑角色出蒙皮 + 骨骼小棍，切换即时，不重跑。"
 
-    def run(self, motion, filename, character=None, skinned=True):
+    def run(self, motion, filename, character=None, skinned=True, contacts=None):
         from ..soma.binding import write_character_glb, write_humanoid_glb
+
+        try:
+            payload = _contact_payload(contacts, motion)
+        except ValueError as exc:
+            print(f"[zmocap] 触地光圈不可用：{exc}")
+            payload = None
 
         skeleton = str(motion.get("skeleton") or "")
         if skeleton != "vrm":
@@ -144,6 +172,7 @@ class ZMocapVRMPreviewer:
         print(f"[zmocap] VRM preview {Path(path).name} ({report['bones']} bones, scale {report.get('scale', 1.0)})")
         return {
             "ui": {"zmocap_glb": [relative], "zmocap_layer": ["skinned" if skinned else "bones"],
+                   "zmocap_contact": [payload] if payload else [],
                    "zmocap_rig": [{"path": str(path), **report}]},
             "result": (relative,),
         }

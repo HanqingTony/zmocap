@@ -93,15 +93,21 @@ app.registerExtension({
       const onExecuted = nodeType.prototype.onExecuted;
       nodeType.prototype.onExecuted = function (message) {
         onExecuted?.apply(this, arguments);
+        const viewer = this.__zmocapViewer;
+        const contact = message?.zmocap_contact?.[0];
+        if (viewer) {
+          viewer.setContacts(contact || null);
+          if (contact?.warnings?.length) {
+            console.warn("[zmocap] 触地校验", contact.warnings);
+          }
+        }
         const name = message?.zmocap_glb?.[0];
         if (!name) return;
-        const viewer = this.__zmocapViewer;
         const skinned = this.widgets?.find((w) => w.name === "skinned");
         viewer?.load(outputFileUrl(name)).then((info) => {
           viewer.setLayer(skinned?.value === false ? "bones" : "skinned");
-          const hint = this.widgets?.find((w) => w.name === "zmocap_preview");
-          void hint;
-          console.log(`[zmocap] 预览已载入 ${name}（动画 ${info?.animations || 0} 条）`);
+          viewer.setContacts(contact || null);
+          console.log(`[zmocap] 预览已载入 ${name}（动画 ${info?.animations || 0} 条，触地 ${contact ? "有" : "无"}）`);
         });
       };
     }

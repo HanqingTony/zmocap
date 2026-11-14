@@ -280,6 +280,72 @@ class ZMocapFootContact:
         return (motion, contacts)
 
 
+def validate_contacts(contacts, motion) -> list[str]:
+    """按 ``zmocap.contact.v1`` 校验；返回警告列表（不致命的问题）。"""
+    if not isinstance(contacts, dict):
+        raise ValueError("触地数据不是字典")
+    fmt = contacts.get("format")
+    if fmt != CONTACT_FORMAT:
+        raise ValueError(f"触地数据格式不匹配：期望 {CONTACT_FORMAT}，实际 {fmt}")
+    arrays = contacts.get("arrays") or {}
+    contact = arrays.get("contact")
+    if contact is None:
+        raise ValueError("触地数据缺少 arrays.contact")
+    contact = np.asarray(contact)
+    if contact.ndim != 2 or contact.shape[1] != 2:
+        raise ValueError(f"arrays.contact 形状应为 (T,2)，实际 {contact.shape}")
+
+    warnings: list[str] = []
+    frames = int(contacts.get("frames", contact.shape[0]))
+    if frames != int(contact.shape[0]):
+        warnings.append(f"frames={frames} 与 arrays.contact 长度 {contact.shape[0]} 不一致")
+    motion_frames = len(np.asarray(motion.get("joints", [])))
+    if motion_frames and frames != motion_frames:
+        warnings.append(f"触地有 {frames} 帧，动作有 {motion_frames} 帧（将按较短者对齐）")
+    fps = float(contacts.get("fps", 0.0))
+    motion_fps = float(motion.get("fps", 0.0))
+    if fps and motion_fps and abs(fps - motion_fps) > 0.01:
+        warnings.append(f"触地 fps={fps:.2f} 与动作 fps={motion_fps:.2f} 不同")
+    expected = (contacts.get("meta") or {}).get("motion_sha256")
+    if expected and motion_frames:
+        try:
+            actual = _motion_hash(motion)
+        except Exception:
+            return warnings
+        if expected != actual:
+            warnings.append("触地数据的 motion_sha256 与当前动作不一致（可能来自别的视频）")
+    return warnings
+
+
+def ring_payload(contacts, motion) -> dict:
+    """把触地数据变成预览用的双层光圈：每帧左右脚的着地位置与开关。"""
+    if "joints" not in motion:
+        raise ValueError("触地光圈需要带关节序列的 SMPL-X 运动（VRM 运动只有旋转，无法定位地面点）")
+    warnings = validate_contacts(contacts, motion)
+    joints = np.asarray(motion["joints"], dtype=np.float64)
+    contact = np.asarray((contacts.get("arrays") or {})["contact"]) > 0
+    frames = min(joints.shape[0], contact.shape[0])
+    floor = float((contacts.get("floor") or {}).get("height", 0.0))
+
+    def side(column: int, foot_joint: int, ankle_joint: int) -> dict:
+        points = np.stack([joints[:frames, foot_joint], joints[:frames, ankle_joint]], axis=1).mean(axis=1)
+        position = np.stack([points[:, 0], np.full(frames, floor), points[:, 2]], axis=1)
+        return {
+            "on": contact[:frames, column].astype(int).tolist(),
+            "pos": np.round(position, 4).tolist(),
+        }
+
+    return {
+        "format": CONTACT_FORMAT,
+        "fps": float(contacts.get("fps", motion.get("fps", 30.0))),
+        "frames": int(frames),
+        "floor": floor,
+        "left": side(0, 10, 7),
+        "right": side(1, 11, 8),
+        "warnings": warnings,
+    }
+
+
 class ZMocapContactLoad:
     """读取手改后的 ``zmocap.contact.v1`` JSON，覆盖自动区间。"""
 

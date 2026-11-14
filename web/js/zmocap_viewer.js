@@ -39,6 +39,47 @@ export function createViewer(container) {
   controls.dampingFactor = 0.08;
   controls.update();
 
+  const contactGroup = new THREE.Group();
+  contactGroup.name = "zmocap_contact_rings";
+  scene.add(contactGroup);
+
+  const CONTACT_COLORS = { left: 0x3b82f6, right: 0xef4444 };
+
+  /** 触地光圈：平铺在地面上，按帧开关，蓝=左、红=右。 */
+  function makeRing(side) {
+    const geometry = new THREE.RingGeometry(0.055, 0.085, 32);
+    const material = new THREE.MeshBasicMaterial({
+      color: CONTACT_COLORS[side],
+      transparent: true,
+      opacity: 0.9,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.name = `zmocap_contact_${side}`;
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.visible = false;
+    mesh.renderOrder = 3;
+    contactGroup.add(mesh);
+    return mesh;
+  }
+  const rings = { left: makeRing("left"), right: makeRing("right") };
+
+  function updateContactRings() {
+    if (!contact) return;
+    const fps = contact.fps || 30;
+    const total = contact.frames || 1;
+    const index = Math.min(total - 1, Math.max(0, Math.floor(elapsed * fps)));
+    for (const side of ["left", "right"]) {
+      const data = contact[side];
+      const ring = rings[side];
+      const on = data?.on?.[index];
+      const position = data?.pos?.[index];
+      ring.visible = !!on && Array.isArray(position);
+      if (ring.visible) ring.position.set(position[0], position[1] + 0.002, position[2]);
+    }
+  }
+
   const grid = new THREE.GridHelper(6, 12, 0x445566, 0x223344);
   grid.material.opacity = 0.5;
   grid.material.transparent = true;
@@ -49,6 +90,8 @@ export function createViewer(container) {
   let playing = true;
   let disposed = false;
   let frames = [];
+  let elapsed = 0;
+  let contact = null;
 
   const clock = new THREE.Clock();
 
@@ -75,7 +118,11 @@ export function createViewer(container) {
       resize();
     }
     const delta = clock.getDelta();
-    if (mixer && playing) mixer.update(delta);
+    if (mixer && playing) {
+      mixer.update(delta);
+      elapsed += delta;
+    }
+    updateContactRings();
     controls.update();
     renderer.render(scene, camera);
   }
@@ -222,6 +269,17 @@ export function createViewer(container) {
       return found;
     },
 
+    /** 载入触地数据（zmocap.contact.v1 的预览载荷）；null 表示清除光圈。 */
+    setContacts(payload) {
+      contact = payload || null;
+      if (!contact) {
+        rings.left.visible = false;
+        rings.right.visible = false;
+      }
+      updateContactRings();
+      return !!contact;
+    },
+
     setPlaying(value) {
       playing = value;
       if (mixer) mixer.timeScale = value ? 1 : 0;
@@ -235,6 +293,11 @@ export function createViewer(container) {
     dispose() {
       disposed = true;
       clear();
+      for (const side of ["left", "right"]) {
+        rings[side].geometry.dispose();
+        rings[side].material.dispose();
+      }
+      scene.remove(contactGroup);
       controls.dispose();
       renderer.dispose();
       renderer.domElement.remove();
