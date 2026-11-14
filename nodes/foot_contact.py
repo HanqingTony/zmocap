@@ -167,7 +167,7 @@ class ZMocapFootContact:
     @classmethod
     def INPUT_TYPES(cls):
         return {
-            "required": {"motion": ("ZMOCAP_MOTION",)},
+            "required": {"motion": ("ZMOCAP_SMPLX",)},
             "optional": {
                 "static_conf": ("FLOAT", {"default": 0.8, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "height_tolerance": ("FLOAT", {"default": 0.05, "min": 0.0, "max": 0.5, "step": 0.005}),
@@ -178,7 +178,7 @@ class ZMocapFootContact:
             },
         }
 
-    RETURN_TYPES = ("ZMOCAP_MOTION", "ZMOCAP_CONTACTS")
+    RETURN_TYPES = ("ZMOCAP_SMPLX", "ZMOCAP_CONTACTS")
     RETURN_NAMES = ("motion", "contacts")
     FUNCTION = "run"
     CATEGORY = "zmocap"
@@ -277,7 +277,9 @@ class ZMocapFootContact:
         right = sum(end - start for start, end in ranges[1])
         print(f"[zmocap] foot contact: {frames} 帧，左 {len(ranges[0])} 段/{left} 帧，"
               f"右 {len(ranges[1])} 段/{right} 帧，floor {floor:.3f} m")
-        return (motion, contacts)
+        from ..motion import make_clip
+
+        return (make_clip(motion, "smplx", sources=motion.get("sources") or {}), contacts)
 
 
 def validate_contacts(contacts, motion) -> list[str]:
@@ -353,7 +355,7 @@ class ZMocapContactLoad:
     def INPUT_TYPES(cls):
         return {
             "required": {"path": ("STRING", {"default": ""})},
-            "optional": {"motion": ("ZMOCAP_MOTION",)},
+            "optional": {"motion": ("ZMOCAP_SMPLX",)},
         }
 
     RETURN_TYPES = ("ZMOCAP_CONTACTS",)

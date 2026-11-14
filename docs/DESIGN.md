@@ -89,3 +89,24 @@ ExMR 核心模块在 ComfyUI 的 Python/torch 下可直接 import；缺的只是
 ## 命名
 
 项目名 `zmocap`：`z` 系列命名（与 `z-llm`/`z-comfyui` 等一致），`mocap` 表能力。不再沿用上游项目名，避免与"移植"混淆。
+
+## MotionClip 契约（`zmocap.motion/1`）
+
+所有跨节点传递的动作必须是带自描述头的 dict：
+
+| 字段 | 含义 |
+|---|---|
+| `format` | 固定 `zmocap.motion/1` |
+| `skeleton` | `smplx`(55) / `soma`(78) / `vrm`(52) |
+| `coordinate_system` | `y-up-right-handed-front-minus-z` |
+| `units` | `meter` |
+| `fps` / `frames` | 采样率与帧数 |
+| `joints` | `(T, J, 3)` 世界坐标（SMPL-X / SOMA） |
+| `world_rotation` / `transl` | VRM humanoid 的世界旋转与髋部位移 |
+| `params` | 仅 smplx：SMPL-X 参数 |
+| `digest` | `sha256:` 内容指纹，覆盖骨架/帧率/帧数/关节名/关节坐标/关键参数（量化到 1e-6 再哈希） |
+| `sources` | 来源链，便于回溯 |
+
+节点类型是**强类型**的：`ZMOCAP_SMPLX` / `ZMOCAP_SOMA` / `ZMOCAP_VRM`。
+在解码处调用 `validate_clip(clip, "smplx")`，接线错误（例如把 SOMA 接到 SMPL 端口）会立刻抛
+`MotionError`，而不是渲染出怪东西；`digest` 不一致同样拒绝执行——把"静默错"变成"显式错"。

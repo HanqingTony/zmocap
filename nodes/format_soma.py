@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import numpy as np
 
-MOTION = "ZMOCAP_MOTION"
+SMPLX = "ZMOCAP_SMPLX"
+SOMA = "ZMOCAP_SOMA"
+VRM = "ZMOCAP_VRM"
 
 
 def _skeleton(motion: dict) -> str:
@@ -23,9 +25,9 @@ class ZMocapSMPL2SOMA:
 
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required": {"motion": (MOTION,)}}
+        return {"required": {"motion": (SMPLX,)}}
 
-    RETURN_TYPES = (MOTION,)
+    RETURN_TYPES = (SOMA,)
     RETURN_NAMES = ("motion",)
     OUTPUT_TOOLTIPS = ("SOMA 骨架上的运动（skeleton='soma'），可直接接 SOMA2VRM",)
     FUNCTION = "run"
@@ -35,9 +37,9 @@ class ZMocapSMPL2SOMA:
     def run(self, motion):
         from ..soma.motion import build_soma_motion
 
-        skeleton = _skeleton(motion)
-        if skeleton != "smplx":
-            raise ValueError(f"SMPL2SOMA 需要 SMPL-X 运动，收到 {skeleton}")
+        from ..motion import make_clip, validate_clip
+
+        validate_clip(motion, "smplx")
         result = build_soma_motion(motion["params"], fps=float(motion.get("fps", 30.0)))
         out = {
             "skeleton": "soma",
@@ -49,6 +51,7 @@ class ZMocapSMPL2SOMA:
             "world": np.asarray(result.world),
             "source": "smpl2soma",
         }
+        out = make_clip(out, "soma", sources={"engine": "smpl2soma"})
         print(f"[zmocap] SMPL2SOMA: {out['frames']} 帧 × {len(out['names'])} 关节")
         return (out,)
 
@@ -58,9 +61,9 @@ class ZMocapSOMA2VRM:
 
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required": {"motion": (MOTION,)}}
+        return {"required": {"motion": (SOMA,)}}
 
-    RETURN_TYPES = (MOTION,)
+    RETURN_TYPES = (VRM,)
     RETURN_NAMES = ("motion",)
     OUTPUT_TOOLTIPS = ("规范 humanoid 骨架上的运动（skeleton='vrm'），接 Rig 绑定角色",)
     FUNCTION = "run"
@@ -71,9 +74,9 @@ class ZMocapSOMA2VRM:
         from ..soma.motion import SomaMotion
         from ..soma.vrm_motion import soma_to_vrm
 
-        skeleton = _skeleton(motion)
-        if skeleton != "soma":
-            raise ValueError(f"SOMA2VRM 需要 SOMA 运动，收到 {skeleton}")
+        from ..motion import make_clip, validate_clip
+
+        validate_clip(motion, "soma")
         soma = SomaMotion(
             names=list(motion["names"]),
             parents=np.asarray(motion["parents"]),
@@ -83,5 +86,6 @@ class ZMocapSOMA2VRM:
         )
         out = soma_to_vrm(soma)
         out["source"] = "soma2vrm"
+        out = make_clip(out, "vrm", sources={"engine": "soma2vrm", "from": motion.get("sources") or {}})
         print(f"[zmocap] SOMA2VRM: {out['frames']} 帧 × {len(out['names'])} 骨")
         return (out,)

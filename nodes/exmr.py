@@ -36,7 +36,7 @@ class ZMocapExMR:
             },
         }
 
-    RETURN_TYPES = ("ZMOCAP_MOTION",)
+    RETURN_TYPES = ("ZMOCAP_SMPLX",)
     RETURN_NAMES = ("motion",)
     FUNCTION = "run"
     CATEGORY = "zmocap"
@@ -79,7 +79,11 @@ class ZMocapExMR:
             "source": "exmr/sapiens2",
             "has_hands": bool(with_hands),
         }
+        from ..motion import make_clip
+
+        motion = make_clip(motion, "smplx", sources={"engine": "exmr", "keypoints": "sapiens2", "hands": "hamer"})
         _release()
+        print(f"[zmocap] ExMR 产出 {motion['digest'][7:19]} ({motion['frames']} 帧)")
         return (motion,)
 
 

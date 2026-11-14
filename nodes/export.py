@@ -15,7 +15,7 @@ class ZMocapExport:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "motion": ("ZMOCAP_MOTION",),
+                "motion": ("ZMOCAP_SMPLX",),
                 "filename": ("STRING", {"default": "zmocap_motion"}),
             },
             "optional": {
@@ -30,6 +30,9 @@ class ZMocapExport:
     CATEGORY = "zmocap"
 
     def run(self, motion, filename, write_bvh=True, contacts=None):
+        from ..motion import validate_clip
+
+        validate_clip(motion, "smplx")
         try:
             import folder_paths
 

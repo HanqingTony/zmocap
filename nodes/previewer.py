@@ -57,7 +57,7 @@ class ZMocapSMPLPreviewer:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "motion": ("ZMOCAP_MOTION",),
+                "motion": ("ZMOCAP_SMPLX",),
                 "filename": ("STRING", {"default": "zmocap_smpl"}),
             },
             "optional": {
@@ -80,9 +80,9 @@ class ZMocapSMPLPreviewer:
 
         payload = _contact_payload(contacts, motion)
 
-        skeleton = str(motion.get("skeleton") or ("smplx" if "params" in motion else "unknown"))
-        if skeleton != "smplx":
-            raise ValueError(f"SMPL Previewer 需要 SMPL-X 运动，收到 {skeleton}")
+        from ..motion import validate_clip
+
+        validate_clip(motion, "smplx")
         target = _character_path(character)
 
         if not target:
@@ -126,7 +126,7 @@ class ZMocapVRMPreviewer:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "motion": ("ZMOCAP_MOTION",),
+                "motion": ("ZMOCAP_VRM",),
                 "filename": ("STRING", {"default": "zmocap_vrm"}),
             },
             "optional": {
@@ -152,9 +152,9 @@ class ZMocapVRMPreviewer:
             print(f"[zmocap] 触地光圈不可用：{exc}")
             payload = None
 
-        skeleton = str(motion.get("skeleton") or "")
-        if skeleton != "vrm":
-            raise ValueError(f"VRM Previewer 需要 skeleton='vrm' 的运动，收到 {skeleton or '未知'}")
+        from ..motion import validate_clip
+
+        validate_clip(motion, "vrm")
         target = _character_path(character)
         animation = np.asarray(motion["world_rotation"])
         digest = _digest([
